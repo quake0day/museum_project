@@ -11,11 +11,22 @@ from django.shortcuts import render
 
 logger = logging.getLogger(__name__)
 
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 @csrf_exempt
 def interaction_list(request):
     interactions = Interaction.objects.all().order_by('-date')
-    return render(request, 'interaction_list.html', {'interactions': interactions})
+    page = request.GET.get('page', 1)  # 获取当前页码，默认为1
+    paginator = Paginator(interactions, 10)  # 每页显示10条数据
+
+    try:
+        interactions_page = paginator.page(page)
+    except PageNotAnInteger:
+        interactions_page = paginator.page(1)
+    except EmptyPage:
+        interactions_page = paginator.page(paginator.num_pages)
+
+    return render(request, 'interaction_list.html', {'interactions': interactions_page})
 
 @method_decorator(csrf_exempt, name='dispatch')
 class InteractionList(APIView):

@@ -5,6 +5,28 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Museum Interaction List</title>
+    <style>
+        /* 简单的分页样式 */
+        .pagination {
+            display: flex;
+            list-style: none;
+            padding: 0;
+        }
+        .pagination li {
+            margin: 0 5px;
+        }
+        .pagination a {
+            text-decoration: none;
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            color: #007bff;
+        }
+        .pagination .active a {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+    </style>
 </head>
 <body>
     <h1>Museum Interaction List</h1>
@@ -15,6 +37,28 @@
             <hr>
         </div>
     {% endfor %}
+
+    <!-- 分页导航 -->
+    <ul class="pagination">
+        {% if interactions.has_previous %}
+            <li><a href="?page={{ interactions.previous_page_number }}">上一页</a></li>
+        {% else %}
+            <li><span>上一页</span></li>
+        {% endif %}
+
+        {% for num in interactions.paginator.page_range %}
+            {% if interactions.number == num %}
+                <li class="active"><span>{{ num }}</span></li>
+            {% else %}
+                <li><a href="?page={{ num }}">{{ num }}</a></li>
+            {% endif %}
+        {% endfor %}
+
+        {% if interactions.has_next %}
+            <li><a href="?page={{ interactions.next_page_number }}">下一页</a></li>
+        {% else %}
+            <li><span>下一页</span></li>
+        {% endif %}
+    </ul>
 </body>
 </html>
-
