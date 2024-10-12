@@ -1,6 +1,6 @@
 blinker==1.5
 Brlapi==0.8.4
-certifi==2022.9.24
+certifi==2024.7.4
 chardet==5.1.0
 charset-normalizer==3.0.1
 cryptography==38.0.4
