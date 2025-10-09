@@ -1,64 +1,557 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hans">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Museum Interaction List</title>
+    <title>博物馆互动乐园</title>
     <style>
-        /* 简单的分页样式 */
-        .pagination {
+        :root {
+            --primary: #5b6dff;
+            --primary-dark: #3742fa;
+            --accent: #ff9f1c;
+            --bg: #f4f7ff;
+            --card-bg: #ffffff;
+            --text: #1f2a44;
+            --muted: #5d6a8a;
+            --success: #2ed573;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+            background: linear-gradient(180deg, rgba(91,109,255,0.15) 0%, rgba(244,247,255,1) 60%);
+            color: var(--text);
+        }
+
+        a {
+            color: inherit;
+        }
+
+        header {
+            background: radial-gradient(circle at top left, #5b6dff, #7f5fff);
+            color: white;
+            padding: 3.5rem 1.5rem 4rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::after {
+            content: "";
+            position: absolute;
+            width: 260px;
+            height: 260px;
+            background: rgba(255, 255, 255, 0.18);
+            border-radius: 50%;
+            top: -80px;
+            right: -60px;
+        }
+
+        .hero {
+            max-width: 960px;
+            margin: 0 auto;
             display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .hero h1 {
+            font-size: clamp(2rem, 4vw, 3.2rem);
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .hero p {
+            margin: 0;
+            max-width: 620px;
+            font-size: 1.1rem;
+        }
+
+        .search-box {
+            background: rgba(255, 255, 255, 0.92);
+            border-radius: 16px;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.12);
+            padding: 1rem;
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .search-box label {
+            font-weight: 600;
+            color: var(--muted);
+            width: 100%;
+        }
+
+        .search-box input[type="text"] {
+            flex: 1 1 240px;
+            padding: 0.85rem 1rem;
+            border-radius: 12px;
+            border: none;
+            font-size: 1rem;
+            background: #edf0ff;
+            color: var(--text);
+            outline: none;
+            transition: box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        .search-box input[type="text"]:focus {
+            box-shadow: 0 0 0 3px rgba(91, 109, 255, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .search-box button {
+            background: var(--accent);
+            color: #1f1f1f;
+            border: none;
+            border-radius: 12px;
+            padding: 0.85rem 1.5rem;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .search-box button:hover,
+        .search-box button:focus {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(255, 159, 28, 0.35);
+        }
+
+        main {
+            max-width: 1120px;
+            margin: -3rem auto 4rem;
+            padding: 0 1.5rem;
+            position: relative;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            border-radius: 18px;
+            padding: 1.25rem 1.5rem;
+            box-shadow: 0 10px 25px rgba(31, 42, 68, 0.12);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(91, 109, 255, 0.15), transparent 65%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .stat-card:hover::after {
+            opacity: 1;
+        }
+
+        .stat-card h2 {
+            margin: 0;
+            font-size: 2.4rem;
+            color: var(--primary-dark);
+        }
+
+        .stat-card p {
+            margin: 0.3rem 0 0;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .spotlight {
+            background: #fff7e6;
+            border-radius: 18px;
+            padding: 1.5rem;
+            box-shadow: 0 12px 30px rgba(255, 159, 28, 0.2);
+            margin-bottom: 2.5rem;
+        }
+
+        .spotlight h3 {
+            margin: 0 0 1rem;
+            font-size: 1.4rem;
+            color: #cc7a00;
+        }
+
+        .spotlight-list {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .spotlight-item {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .spotlight-item img {
+            width: 72px;
+            height: 72px;
+            border-radius: 16px;
+            object-fit: cover;
+            box-shadow: 0 8px 18px rgba(204, 122, 0, 0.25);
+        }
+
+        .spotlight-text strong {
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+
+        .spotlight-text span {
+            color: #cc7a00;
+            font-weight: 600;
+        }
+
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .interaction-card {
+            background: var(--card-bg);
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 18px 40px rgba(31, 42, 68, 0.15);
+            display: flex;
+            flex-direction: column;
+            min-height: 100%;
+            position: relative;
+        }
+
+        .interaction-card figure {
+            margin: 0;
+            position: relative;
+        }
+
+        .interaction-card img {
+            width: 100%;
+            height: 220px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .interaction-card .badge {
+            position: absolute;
+            top: 14px;
+            left: 14px;
+            background: rgba(255, 255, 255, 0.85);
+            color: var(--primary-dark);
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            box-shadow: 0 6px 16px rgba(91, 109, 255, 0.2);
+        }
+
+        .interaction-card .content {
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            flex: 1;
+        }
+
+        .interaction-card p {
+            margin: 0;
+            line-height: 1.6;
+            font-size: 1rem;
+        }
+
+        .interaction-card .time {
+            font-size: 0.9rem;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .interaction-card .kid-tip {
+            margin-top: auto;
+            background: #edf9f1;
+            padding: 0.9rem;
+            border-radius: 14px;
+            font-size: 0.95rem;
+            color: var(--success);
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-start;
+        }
+
+        .interaction-card .kid-tip span {
+            font-size: 1.3rem;
+        }
+
+        .empty-state {
+            background: #ffffff;
+            border-radius: 24px;
+            padding: 3rem 2rem;
+            text-align: center;
+            box-shadow: 0 15px 35px rgba(31, 42, 68, 0.12);
+        }
+
+        .empty-state h2 {
+            margin-top: 0;
+            font-size: 1.6rem;
+        }
+
+        .empty-state p {
+            color: var(--muted);
+            margin-bottom: 1.5rem;
+        }
+
+        .helper-tips {
+            margin-top: 3rem;
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 12px 28px rgba(31, 42, 68, 0.15);
+        }
+
+        .helper-tips h3 {
+            margin-top: 0;
+        }
+
+        .helper-list {
+            margin: 0;
+            padding-left: 1rem;
+            color: var(--muted);
+        }
+
+        .pagination {
             list-style: none;
             padding: 0;
+            margin: 3rem 0 0;
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            justify-content: center;
         }
+
         .pagination li {
-            margin: 0 5px;
+            border-radius: 999px;
+            overflow: hidden;
         }
-        .pagination a {
+
+        .pagination a,
+        .pagination span {
+            display: inline-block;
+            padding: 0.65rem 1.1rem;
+            background: #e1e6ff;
+            color: var(--primary-dark);
+            font-weight: 600;
             text-decoration: none;
-            padding: 5px 10px;
-            border: 1px solid #ddd;
-            color: #007bff;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-        .pagination .active a {
-            background-color: #007bff;
-            color: white;
-            border-color: #007bff;
+
+        .pagination a:hover,
+        .pagination a:focus {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(91, 109, 255, 0.3);
+        }
+
+        .pagination .active span {
+            background: var(--primary-dark);
+            color: #ffffff;
+        }
+
+        .pagination .disabled span {
+            background: #e8ebf5;
+            color: #9aa3c4;
+            cursor: not-allowed;
+        }
+
+        footer {
+            text-align: center;
+            color: var(--muted);
+            padding: 2rem 1rem 3rem;
+            font-size: 0.9rem;
+        }
+
+        .to-top {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            border: none;
+            background: var(--primary-dark);
+            color: #ffffff;
+            border-radius: 999px;
+            padding: 0.75rem 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 12px 24px rgba(55, 66, 250, 0.35);
+        }
+
+        .to-top:hover,
+        .to-top:focus {
+            transform: translateY(-2px);
+        }
+
+        @media (max-width: 720px) {
+            header {
+                padding: 2.5rem 1.25rem 3rem;
+            }
+
+            .interaction-card img {
+                height: 200px;
+            }
+
+            .spotlight-item {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .spotlight-item img {
+                width: 100%;
+                height: 160px;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>Museum Interaction List</h1>
-    {% for interaction in interactions %}
-        <div>
-            <img src="{{ interaction.image.url }}" alt="Exhibit Image" style="max-width: 300px;">
-            <p>{{ interaction.response }}</p>
-            <hr>
+    <a href="#main-content" style="position:absolute;left:-999px;top:auto;width:1px;height:1px;overflow:hidden;">跳过导航</a>
+    <header>
+        <div class="hero">
+            <h1>博物馆互动乐园</h1>
+            <p>一起探索来自小朋友和游客的奇思妙想！在这里，灵感从照片中飞出，故事在留言里成长。</p>
+            <form class="search-box" action="" method="get">
+                <label for="search">搜索精彩内容</label>
+                <input id="search" type="text" name="q" value="{{ search_query }}" placeholder="输入关键词，如“恐龙”“宇宙”“艺术”..." aria-label="搜索互动内容">
+                <button type="submit">开始探索</button>
+            </form>
         </div>
-    {% endfor %}
+    </header>
 
-    <!-- 分页导航 -->
-    <ul class="pagination">
-        {% if interactions.has_previous %}
-            <li><a href="?page={{ interactions.previous_page_number }}">上一页</a></li>
-        {% else %}
-            <li><span>上一页</span></li>
+    <main id="main-content">
+        <section class="stats-grid" aria-label="互动统计">
+            <article class="stat-card">
+                <p>馆内全部互动</p>
+                <h2>{{ total_interactions }}</h2>
+            </article>
+            <article class="stat-card">
+                <p>当前展示</p>
+                <h2>{{ filtered_count }}</h2>
+            </article>
+            <article class="stat-card">
+                <p>今日心情指数</p>
+                <h2>😊🌟</h2>
+                <p>越多留言，越开心！</p>
+            </article>
+        </section>
+
+        {% if spotlight_interactions %}
+        <section class="spotlight" aria-label="精选互动">
+            <h3>今日亮点 ✨</h3>
+            <div class="spotlight-list">
+                {% for item in spotlight_interactions %}
+                <div class="spotlight-item">
+                    <img src="{{ item.image.url }}" alt="{{ item.response|truncatechars:20 }}">
+                    <div class="spotlight-text">
+                        <strong>{{ item.response|truncatechars:48 }}</strong>
+                        <span>{{ item.date|date:"Y年n月j日 H:i" }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
         {% endif %}
 
-        {% for num in interactions.paginator.page_range %}
-            {% if interactions.number == num %}
-                <li class="active"><span>{{ num }}</span></li>
+        {% if filtered_count %}
+        <section class="gallery-grid" aria-label="互动列表">
+            {% for interaction in interactions %}
+            <article class="interaction-card">
+                <figure>
+                    <img src="{{ interaction.image.url }}" alt="来自展品的灵感照片">
+                    <span class="badge">第 {{ forloop.counter0|add:start_index }} 条</span>
+                </figure>
+                <div class="content">
+                    <p>{{ interaction.response }}</p>
+                    <p class="time">记录于 {{ interaction.date|date:"Y年n月j日 H:i" }}</p>
+                    <div class="kid-tip"><span>💡</span>用自己的语言讲故事，博物馆就像一本会发光的日记！</div>
+                </div>
+            </article>
+            {% endfor %}
+        </section>
+        {% else %}
+        <section class="empty-state" aria-live="polite">
+            <h2>还没有找到相关的互动哦</h2>
+            <p>换个关键词试试，比如“动物”“发明”或者“颜色”，总会有意外惊喜！</p>
+            <div class="helper-tips">
+                <h3>试试这些小技巧：</h3>
+                <ul class="helper-list">
+                    <li>缩短关键词，例如把“宇宙飞船”改成“宇宙”。</li>
+                    <li>浏览首页精选亮点，看看大家都喜欢什么。</li>
+                    <li>带着好奇心再来一次探索吧！</li>
+                </ul>
+            </div>
+        </section>
+        {% endif %}
+
+        <ul class="pagination" role="navigation" aria-label="分页导航">
+            {% if interactions.has_previous %}
+                <li>
+                    {% if search_query %}
+                    <a href="?q={{ search_query|urlencode }}&page={{ interactions.previous_page_number }}">上一页</a>
+                    {% else %}
+                    <a href="?page={{ interactions.previous_page_number }}">上一页</a>
+                    {% endif %}
+                </li>
             {% else %}
-                <li><a href="?page={{ num }}">{{ num }}</a></li>
+                <li class="disabled"><span>上一页</span></li>
             {% endif %}
-        {% endfor %}
 
-        {% if interactions.has_next %}
-            <li><a href="?page={{ interactions.next_page_number }}">下一页</a></li>
-        {% else %}
-            <li><span>下一页</span></li>
-        {% endif %}
-    </ul>
+            {% for num in interactions.paginator.page_range %}
+                {% if interactions.number == num %}
+                    <li class="active"><span>{{ num }}</span></li>
+                {% else %}
+                    <li>
+                        {% if search_query %}
+                        <a href="?q={{ search_query|urlencode }}&page={{ num }}">{{ num }}</a>
+                        {% else %}
+                        <a href="?page={{ num }}">{{ num }}</a>
+                        {% endif %}
+                    </li>
+                {% endif %}
+            {% endfor %}
+
+            {% if interactions.has_next %}
+                <li>
+                    {% if search_query %}
+                    <a href="?q={{ search_query|urlencode }}&page={{ interactions.next_page_number }}">下一页</a>
+                    {% else %}
+                    <a href="?page={{ interactions.next_page_number }}">下一页</a>
+                    {% endif %}
+                </li>
+            {% else %}
+                <li class="disabled"><span>下一页</span></li>
+            {% endif %}
+        </ul>
+
+        <section class="helper-tips" style="margin-top: 3rem;">
+            <h3>给家长和老师的小贴士</h3>
+            <ul class="helper-list">
+                <li>鼓励孩子描述他们看到的细节，让表达更生动。</li>
+                <li>尝试和孩子一起对照片编故事，培养创造力。</li>
+                <li>把喜欢的互动收藏下来，下次参观时再次体验。</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        感谢每一位分享灵感的小朋友！继续探索，让博物馆充满欢乐的声音。
+    </footer>
+
+    <button class="to-top" type="button" onclick="window.scrollTo({top: 0, behavior: 'smooth'});" aria-label="返回顶部">回到顶部</button>
 </body>
 </html>

@@ -15,9 +15,18 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 @csrf_exempt
 def interaction_list(request):
-    interactions = Interaction.objects.all().order_by('-date')
-    page = request.GET.get('page', 1)  # 获取当前页码，默认为1
-    paginator = Paginator(interactions, 10)  # 每页显示10条数据
+    interactions_qs = Interaction.objects.all().order_by('-date')
+
+    search_query = request.GET.get('q', '').strip()
+    if search_query:
+        interactions_qs = interactions_qs.filter(response__icontains=search_query)
+
+    total_interactions = Interaction.objects.count()
+    filtered_count = interactions_qs.count()
+    spotlight_interactions = list(interactions_qs[:3])
+
+    page = request.GET.get('page', 1)
+    paginator = Paginator(interactions_qs, 8)
 
     try:
         interactions_page = paginator.page(page)
@@ -26,7 +35,18 @@ def interaction_list(request):
     except EmptyPage:
         interactions_page = paginator.page(paginator.num_pages)
 
-    return render(request, 'interaction_list.html', {'interactions': interactions_page})
+    start_index = interactions_page.start_index() if filtered_count else 0
+
+    context = {
+        'interactions': interactions_page,
+        'search_query': search_query,
+        'total_interactions': total_interactions,
+        'filtered_count': filtered_count,
+        'spotlight_interactions': spotlight_interactions,
+        'start_index': start_index,
+    }
+
+    return render(request, 'interaction_list.html', context)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class InteractionList(APIView):
