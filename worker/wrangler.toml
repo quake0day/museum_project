@@ -1,0 +1,28 @@
+name = "museiq"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+
+[vars]
+PAGE_SIZE = "12"
+
+# D1 — replace database_id after running `wrangler d1 create museum-db`
+[[d1_databases]]
+binding = "DB"
+database_name = "museum-db"
+database_id = "f0509306-a0cf-4bcb-9da0-95cbd99b2d74"
+migrations_dir = "migrations"
+
+# R2 — create with `wrangler r2 bucket create museum-media`
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "museum-media"
+
+[observability]
+enabled = true
+
+[placement]
+mode = "smart"
