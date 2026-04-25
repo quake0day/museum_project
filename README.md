@@ -1,105 +1,135 @@
-# MuseIQ - Python Backend Service
+# MuseIQ
 
-MuseIQ is a server-side application designed to handle interactions and image processing for a museum guide app. This backend is built using Django and provides a REST API for storing, processing, and retrieving information about user interactions with various exhibits, including text descriptions and image data.
+> Museum interaction platform — students photograph exhibits with the iOS app, the
+> response is captured, everything lives at the edge, and it's all browsable in
+> a polished web UI.
 
-## Features
+**Live:** [museiq.darlingtree.com](https://museiq.darlingtree.com) ·
+fallback [museiq.quake0day.workers.dev](https://museiq.quake0day.workers.dev)
 
-* **User Interaction Management**: Stores and retrieves user interactions, including descriptions, dates, and associated images.
-* **Base64 Image Handling**: Processes base64-encoded images and converts them into file objects for storage.
-* **Data Synchronization**: Supports data synchronization between the server and iOS clients, ensuring that user interactions are always up-to-date.
-* **Error Logging**: Logs request data and validation errors to help debug issues efficiently.
+[![Deploy MuseIQ Worker](https://github.com/quake0day/museum_project/actions/workflows/deploy.yml/badge.svg)](https://github.com/quake0day/museum_project/actions/workflows/deploy.yml)
 
-## Prerequisites
+## What it does
 
-Before setting up the server, make sure you have the following installed:
+- iOS app captures `{photo, description, timestamp}` per exhibit and POSTs a
+  batched JSON array to `/api/interactions/list`.
+- The server decodes each base64 image, streams it into Cloudflare R2,
+  records the metadata in D1, and returns a status payload.
+- The web side serves a server-rendered dashboard, a paginated grid with full
+  text search, and an image lightbox — light and dark themes included.
 
-* Python 3.11 or higher
-* Django 5.1.2
-* Virtual environment tools (`venv` or `virtualenv`)
-* Any other dependencies listed in `requirements.txt`
+## Architecture
 
-## Getting Started
+| | |
+|---|---|
+| **Runtime** | Cloudflare Workers (Hono router, TypeScript) |
+| **Database** | Cloudflare D1 (`interactions` table) |
+| **Object store** | Cloudflare R2 (`museum-media` bucket, immutable cache) |
+| **Static assets** | Workers Assets (`worker/public/`) |
+| **Auto-deploy** | GitHub Actions on push to `worker/**` |
 
-### Installation
-
-1. **Clone the repository**:
-
-```bash
-git clone https://github.com/quake0day/museum_project.git
-cd museum_project
+```
+iOS app ──POST JSON─▶ Worker ──base64 decode─▶ R2.put(images/<uuid>.<ext>)
+                          └────────────────────▶ D1 INSERT (id, response, image, date)
+                                                    │
+browser ◀── HTML/CSS/JS ── Worker ◀──── D1 SELECT ───┘
+                            └────── R2.get → /media/* ──▶
 ```
 
-2. **Create and activate a virtual environment**:
+The iOS POST contract was preserved byte-for-byte from the original Go +
+Gin backend, so the app code didn't change when the server moved to the edge.
 
-```bash
-python3 -m venv venv
-source venv/bin/activate # On Windows, use venv\Scripts\activate
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/interactions/list` | iOS submission — JSON array of `{id, response, image, date}` |
+| `GET`  | `/api/interactions/list?page=&q=` | Paginated JSON with optional text search |
+| `GET`  | `/api/stats` | `{ total, today, week, latest_at }` |
+| `GET`  | `/api/health` | Liveness probe |
+| `GET`  | `/media/*` | Streams images from R2 with `Cache-Control: immutable` |
+
+## Web pages
+
+| Path | What |
+|---|---|
+| `/` | Dashboard with live stats and feature overview |
+| `/interactions/view` | Searchable grid · 12/page · click-to-zoom lightbox |
+
+## Repo layout
+
+```
+museum_project/
+├── worker/                       # ★ Cloudflare Worker (the live service)
+│   ├── src/
+│   │   ├── index.ts              # Hono routes
+│   │   ├── db.ts                 # D1 queries (list, stats, save)
+│   │   ├── templates.ts          # Server-rendered HTML
+│   │   └── util.ts               # base64, date, escape helpers
+│   ├── public/                   # Static assets (CSS, JS, favicon)
+│   ├── migrations/0001_init.sql  # D1 schema
+│   ├── scripts/migrate.ts        # Django sqlite → D1 + R2 (one-shot)
+│   └── wrangler.toml
+├── .github/workflows/deploy.yml  # Auto-deploy on push to worker/**
+├── api/  config/  controllers/   # Legacy Django + Go versions (archived)
+└── media/ db.sqlite3             # Original local data (kept for migration)
 ```
 
-3. **Install dependencies**:
+The legacy Django and Go code in the repo root (`api/`, `controllers/`,
+`models/`, `museum_project/`, `main.go`, etc.) is the historical record of
+the project's earlier incarnations. The live service is `worker/`.
+
+## Auto-deploy
+
+Pushing any change under `worker/**` (or to the workflow file itself)
+triggers `.github/workflows/deploy.yml`, which runs:
+
+1. `npm ci`
+2. `tsc --noEmit -p tsconfig.json` (type-check)
+3. `cloudflare/wrangler-action@v3` → `wrangler deploy`
+
+Required GitHub secrets:
+
+- `CLOUDFLARE_API_TOKEN` — API token with the **Edit Cloudflare Workers** template
+- `CLOUDFLARE_ACCOUNT_ID` — your account id
+
+End-to-end push-to-prod takes ~30 seconds.
+
+## Local development
 
 ```bash
-pip install -r requirements.txt
+cd worker
+npm install
+npm run db:init:local       # apply schema to local D1 simulator
+bun run migrate --local     # seed local D1 + local R2
+npm run db:seed:local
+npm run dev                 # http://localhost:8787
 ```
 
-### Database Setup
+Full deployment & migration playbook: [`worker/README.md`](worker/README.md).
 
-1. **Apply database migrations**:
+## Data
 
-```bash
-python manage.py makemigrations
-python manage.py migrate
-```
+The current production data set is **379 interactions** spanning Oct 2024
+to Oct 2025, sourced from the legacy Django installation on a LAN host and
+migrated via `worker/scripts/migrate.ts`.
 
-2. **Create a superuser to access the Django admin interface**:
+## Roadmap
 
-```bash
-python manage.py createsuperuser
-```
+- **Workers AI auto-tagging** — classify each interaction by era, medium,
+  movement, and subject as it arrives, surface tags in the grid view.
+- **Knowledge wiki** — derived per-tag pages that synthesize what's in the
+  archive into an evolving, browsable mini-Wikipedia of the exhibits the
+  student has photographed.
+- **Multi-user knowledge bases** — let each student build their own wiki
+  from their own captures.
 
-### Running the Server
-
-Start the Django development server:
-
-```bash
-python manage.py runserver
-```
-
-The server should now be running at `http://127.0.0.1:8000/` or the configured host.
-
-## API Endpoints
-
-1. `/api/interactions/list/` (POST)
-   * **Description**: This endpoint accepts interaction data, including a base64-encoded image, user response, date, and a unique ID.
-   * **Data Format**: The image should be base64-encoded with the prefix `data:image/jpeg;base64,`.
-   * **Response**: Returns a success message if the data is saved successfully or error details if the data validation fails.
-
-2. `/api/interactions/view/` (GET)
-   * **Description**: This endpoint retrieves a list of user interactions, ordered by the date of the interaction.
-   * **Response**: Returns a JSON list of interactions, including the image file paths, response details, and interaction dates.
-
-## Error Handling
-
-* **400 Bad Request**: Returned if the request contains invalid data or required fields are missing.
-* **500 Internal Server Error**: Returned if there is a server-side error during the request processing.
-
-## Logging
-
-The server logs all incoming request data and error details to help with debugging. Check the console output for detailed error messages and tracebacks.
-
-## Troubleshooting
-
-* **CSRF Issues**: For POST requests, ensure that the `@csrf_exempt` decorator is applied to avoid CSRF validation errors.
-* **Database Migration Errors**: If you encounter migration issues, check the model definitions and ensure that the migrations are properly created and applied.
-
-## Contributing
-
-Feel free to open issues and submit pull requests if you find any bugs or have suggestions for new features.
+See the inline issues for the active workstream.
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for more details.
+MIT — see [`LICENSE`](LICENSE).
 
 ## Contact
 
-For any questions or issues, please contact the development team at [quake0day@gmail.com].
+[quake0day@gmail.com](mailto:quake0day@gmail.com)
