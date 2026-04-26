@@ -12,6 +12,8 @@ import {
   renderError,
   renderHome,
   renderList,
+  renderWikiPage,
+  renderWikiNotFound,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -22,6 +24,9 @@ import {
   timingSafeEqual,
   verifySession,
 } from "./util";
+import { getAiProvider } from "./ai";
+import { ingestExhibit } from "./wiki/ingest";
+import { getWikiPage, wikiStats } from "./wiki/db";
 
 export type Bindings = {
   DB: D1Database;
@@ -29,6 +34,10 @@ export type Bindings = {
   PAGE_SIZE?: string;
   ADMIN_PASSWORD?: string;
   ADMIN_SESSION_SECRET?: string;
+  AI_PROVIDER?: string;
+  AI_MODEL_CHAT?: string;
+  DEEPSEEK_API_KEY?: string;
+  DEFAULT_USER_ID?: string;
 };
 
 const ADMIN_COOKIE = "museiq_admin";
@@ -104,7 +113,15 @@ app.get("/media/*", async (c) => {
 
 // ───────────────────────────── API ─────────────────────────────
 
-app.get("/api/health", (c) => c.json({ status: "ok" }));
+app.get("/api/health", async (c) => {
+  try {
+    const userId = defaultUserId(c.env);
+    const wiki = await wikiStats(c.env.DB, userId);
+    return c.json({ status: "ok", wiki });
+  } catch (e) {
+    return c.json({ status: "ok" });
+  }
+});
 
 app.get("/api/stats", async (c) => {
   try {
@@ -146,6 +163,7 @@ app.post("/api/interactions/list", async (c) => {
 
   let saved = 0;
   const errors: string[] = [];
+  const ingestIds: string[] = [];
 
   await Promise.all(
     body.map(async (req) => {
@@ -161,13 +179,15 @@ app.post("/api/interactions/list", async (c) => {
           httpMetadata: { contentType },
         });
 
+        const date = nowISO();
         await saveInteractionRow(c.env.DB, {
           id,
           response: req.response ?? "",
           image: key,
-          date: nowISO(),
+          date,
         });
         saved++;
+        ingestIds.push(id);
       } catch (err) {
         const msg = errMsg(err);
         console.error("save interaction failed", msg);
@@ -175,6 +195,15 @@ app.post("/api/interactions/list", async (c) => {
       }
     }),
   );
+
+  // Fire-and-forget AI ingest. Errors land in interactions.analysis_error.
+  if (ingestIds.length && c.env.DEEPSEEK_API_KEY) {
+    c.executionCtx.waitUntil(
+      ingestBatch(c.env, ingestIds).catch((e) =>
+        console.error("background ingest failed", errMsg(e)),
+      ),
+    );
+  }
 
   if (errors.length) {
     return c.json(
@@ -314,6 +343,119 @@ app.post("/admin/delete", async (c) => {
   }
 });
 
+// ───────────────────────────── Wiki render ─────────────────────────────
+
+app.get("/wiki/:user/*", async (c) => {
+  const user = c.req.param("user");
+  const rest = c.req.path.replace(/^\/wiki\/[^/]+\//, "").replace(/\/$/, "");
+  const path = rest || "index";
+  try {
+    const page = await getWikiPage(c.env.DB, user, path);
+    if (!page) {
+      return c.html(renderWikiNotFound({ user, path }), 404);
+    }
+    // For exhibit pages, look up the captured image so we can render it.
+    let imageSrc: string | null = null;
+    if (page.kind === "exhibit" || page.kind === "exhibit_unknown") {
+      const exhibitId = path.replace(/^exhibits\//, "");
+      const row = await getInteractionById(c.env.DB, exhibitId);
+      if (row) imageSrc = "/media/" + row.image.split("/").map(encodeURIComponent).join("/");
+    }
+    return c.html(renderWikiPage({ user, page, imageSrc }));
+  } catch (err) {
+    console.error("wiki render error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+// Convenience: /wiki/:user → index page
+app.get("/wiki/:user", async (c) => {
+  const user = c.req.param("user");
+  return c.redirect(`/wiki/${encodeURIComponent(user)}/index`, 302);
+});
+
+// ───────────────────────────── Admin: ingest ─────────────────────────────
+
+app.post("/admin/ingest/:id", async (c) => {
+  if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
+  const id = c.req.param("id");
+  if (!id) return c.redirect("/admin/photos", 302);
+  if (!c.env.DEEPSEEK_API_KEY) {
+    return c.html(renderError("DEEPSEEK_API_KEY not configured"), 500);
+  }
+  try {
+    await runSingleIngest(c.env, id);
+    return c.redirect(`/wiki/${encodeURIComponent(defaultUserId(c.env))}/exhibits/${encodeURIComponent(id)}`, 302);
+  } catch (err) {
+    console.error("admin ingest error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+app.post("/admin/ingest-all-pending", async (c) => {
+  if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
+  if (!c.env.DEEPSEEK_API_KEY) {
+    return c.html(renderError("DEEPSEEK_API_KEY not configured"), 500);
+  }
+  try {
+    const res = await c.env.DB
+      .prepare("SELECT id FROM interactions WHERE analysis_status IN ('pending','failed') ORDER BY date DESC LIMIT 500")
+      .all<{ id: string }>();
+    const ids = (res.results ?? []).map((r) => r.id);
+    if (ids.length === 0) return c.redirect("/admin/photos", 302);
+    c.executionCtx.waitUntil(
+      ingestBatch(c.env, ids).catch((e) =>
+        console.error("backfill ingest failed", errMsg(e)),
+      ),
+    );
+    return c.html(renderError(`Queued ${ids.length} items for AI ingest. Refresh /admin/photos to watch status chips flip from pending → running → done. Estimated ~${Math.ceil(ids.length * 4 / 60)} min.`), 200);
+  } catch (err) {
+    console.error("ingest-all error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+app.post("/admin/ingest-batch", async (c) => {
+  if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
+  if (!c.env.DEEPSEEK_API_KEY) {
+    return c.html(renderError("DEEPSEEK_API_KEY not configured"), 500);
+  }
+  try {
+    const form = await c.req.formData();
+    const ids = form
+      .getAll("ids")
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+    const pageRaw = form.get("page");
+    const qRaw = form.get("q");
+    const page = Math.max(1, parsePositiveInt(typeof pageRaw === "string" ? pageRaw : undefined, 1));
+    const query = typeof qRaw === "string" ? qRaw.trim() : "";
+
+    if (ids.length === 0) return c.redirect("/admin/photos", 302);
+
+    // Mark all as pending up front, then drain in the background.
+    for (const id of ids) {
+      await c.env.DB
+        .prepare("UPDATE interactions SET analysis_status = 'pending' WHERE id = ?1")
+        .bind(id)
+        .run();
+    }
+    c.executionCtx.waitUntil(
+      ingestBatch(c.env, ids).catch((e) =>
+        console.error("admin batch ingest failed", errMsg(e)),
+      ),
+    );
+
+    const params = new URLSearchParams();
+    if (page > 1) params.set("page", String(page));
+    if (query) params.set("q", query);
+    const qs = params.toString();
+    return c.redirect(`/admin/photos${qs ? `?${qs}` : ""}`, 303);
+  } catch (err) {
+    console.error("admin batch error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
 // ───────────────────────────── 404 ─────────────────────────────
 
 app.notFound((c) =>
@@ -341,6 +483,35 @@ function errMsg(e: unknown): string {
     return String(e);
   } catch {
     return "unknown error";
+  }
+}
+
+function defaultUserId(env: Bindings): string {
+  return env.DEFAULT_USER_ID || "default";
+}
+
+async function runSingleIngest(env: Bindings, id: string): Promise<void> {
+  const ai = getAiProvider(env);
+  const row = await getInteractionById(env.DB, id);
+  if (!row) throw new Error(`interaction not found: ${id}`);
+  await ingestExhibit(ai, env.DB, {
+    exhibitId: id,
+    userId: defaultUserId(env),
+    description: row.response ?? "",
+    capturedAt: row.date ?? new Date().toISOString(),
+    imageHint: row.image ?? undefined,
+  });
+}
+
+async function ingestBatch(env: Bindings, ids: string[]): Promise<void> {
+  // Sequential with small inter-call delay to keep within DeepSeek rate limits.
+  for (const id of ids) {
+    try {
+      await runSingleIngest(env, id);
+    } catch (e) {
+      console.error("ingest", id, errMsg(e));
+    }
+    await new Promise((r) => setTimeout(r, 250));
   }
 }
 

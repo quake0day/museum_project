@@ -3,6 +3,10 @@ export type InteractionRow = {
   response: string;
   image: string;
   date: string;
+  // v0.5+: optional, present after migration 0002
+  analysis_status?: string | null;
+  primary_domain?: string | null;
+  child_summary?: string | null;
 };
 
 export type Stats = {
@@ -28,7 +32,7 @@ export async function getInteractions(
         .first<{ n: number }>(),
       db
         .prepare(
-          "SELECT id, response, image, date FROM interactions WHERE response LIKE ?1 ORDER BY date DESC LIMIT ?2 OFFSET ?3",
+          "SELECT id, response, image, date, analysis_status, primary_domain, child_summary FROM interactions WHERE response LIKE ?1 ORDER BY date DESC LIMIT ?2 OFFSET ?3",
         )
         .bind(like, pageSize, offset)
         .all<InteractionRow>(),
@@ -40,7 +44,7 @@ export async function getInteractions(
     db.prepare("SELECT COUNT(*) AS n FROM interactions").first<{ n: number }>(),
     db
       .prepare(
-        "SELECT id, response, image, date FROM interactions ORDER BY date DESC LIMIT ?1 OFFSET ?2",
+        "SELECT id, response, image, date, analysis_status, primary_domain, child_summary FROM interactions ORDER BY date DESC LIMIT ?1 OFFSET ?2",
       )
       .bind(pageSize, offset)
       .all<InteractionRow>(),

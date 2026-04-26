@@ -8,6 +8,17 @@ directory = "./public"
 
 [vars]
 PAGE_SIZE = "12"
+AI_PROVIDER = "deepseek"
+AI_MODEL_CHAT = "deepseek-chat"
+AI_DAILY_CALL_CAP = "5000"
+ANALYSIS_VERSION = "1"
+DEFAULT_USER_ID = "default"
+
+# bundle the wiki schema doc as a string import in src/ai/prompts.ts
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
 
 # D1 — replace database_id after running `wrangler d1 create museum-db`
 [[d1_databases]]

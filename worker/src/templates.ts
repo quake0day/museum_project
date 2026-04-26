@@ -1,5 +1,7 @@
 import type { InteractionRow, Stats } from "./db";
 import { escapeHtml, formatDate } from "./util";
+import type { WikiPageRow } from "./wiki/db";
+import { renderMarkdown } from "./wiki/render";
 
 function layout(opts: { title: string; active?: string; body: string }): string {
   const active = opts.active ?? "";
@@ -365,15 +367,41 @@ export function renderAdminList(data: {
           const full = escapeHtml(it.response ?? "");
           const date = escapeHtml(it.date ?? "");
           const id = escapeHtml(it.id);
+          const domain = it.primary_domain ?? null;
+          const status = it.analysis_status ?? "pending";
+          const childSummary = it.child_summary ?? "";
+          const domainEmoji = domain
+            ? ({ history: "🏺", art: "🎨", science: "🦖", tech: "⚙️", technology: "⚙️", culture: "🌍" }[domain] ?? "")
+            : "";
+          const statusBadge = (() => {
+            const map: Record<string, string> = {
+              done: "background:#dcfce7;color:#166534;border-color:#86efac;",
+              running: "background:#fef3c7;color:#854d0e;border-color:#fcd34d;",
+              pending: "background:#e2e8f0;color:#475569;border-color:#cbd5e1;",
+              failed: "background:#fee2e2;color:#991b1b;border-color:#fca5a5;",
+              skipped: "background:#f1f5f9;color:#64748b;border-color:#cbd5e1;",
+            };
+            const css = map[status] ?? map.pending;
+            return `<span class="status-chip" style="${css}">${escapeHtml(status)}</span>`;
+          })();
+          const wikiLink = `/wiki/default/exhibits/${encodeURIComponent(it.id)}`;
           return `
       <label class="card admin-card" data-admin-card>
         <div class="card-media">
-          <input type="checkbox" name="ids" value="${id}" class="admin-check" data-admin-check aria-label="Select for deletion" />
+          <input type="checkbox" name="ids" value="${id}" class="admin-check" data-admin-check aria-label="Select for deletion or re-ingest" />
           <img src="${src}" alt="Exhibit response" loading="lazy" decoding="async" />
         </div>
         <div class="card-body">
+          <div class="card-chips">
+            ${domain ? `<span class="domain-chip">${domainEmoji} ${escapeHtml(domain)}</span>` : ""}
+            ${statusBadge}
+          </div>
+          ${childSummary ? `<p class="card-summary">${escapeHtml(childSummary)}</p>` : ""}
           <p class="card-response">${full || '<span class="muted">(no description)</span>'}</p>
-          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time></p>
+          <p class="card-meta">
+            <time datetime="${date}">${escapeHtml(formatDate(it.date))}</time>
+            ${status === "done" ? ` · <a href="${wikiLink}" onclick="event.stopPropagation();">open wiki →</a>` : ""}
+          </p>
         </div>
       </label>`;
         })
@@ -424,6 +452,9 @@ export function renderAdminList(data: {
             ${query ? `<a class="search-clear" href="/admin/photos" aria-label="Clear search">×</a>` : ""}
             <button type="submit" class="btn btn-primary btn-sm">Search</button>
           </form>
+          <form method="POST" action="/admin/ingest-all-pending" onsubmit="return confirm('Run AI ingest on all pending/failed interactions? Uses DeepSeek quota.');">
+            <button type="submit" class="btn btn-ghost btn-sm" title="Drain pending+failed into the ingest queue">Ingest all pending</button>
+          </form>
           <form method="POST" action="/admin/logout">
             <button type="submit" class="btn btn-ghost btn-sm">Sign out</button>
           </form>
@@ -441,6 +472,7 @@ export function renderAdminList(data: {
           </label>
           <span class="muted" data-bulk-count>0 selected</span>
           <span style="flex:1;"></span>
+          <button type="submit" formaction="/admin/ingest-batch" class="btn btn-sm" data-bulk-ingest disabled style="background:#0ea5e9;color:#fff;border-color:#0ea5e9;opacity:.55;" title="Run AI ingest for selected">Re-ingest</button>
           <button type="submit" class="btn btn-sm" data-bulk-submit disabled style="background:#c0392b;color:#fff;border-color:#c0392b;opacity:.55;">Delete selected</button>
         </div>
 
@@ -456,6 +488,10 @@ export function renderAdminList(data: {
             cursor: pointer;
           }
           .admin-card.is-selected { outline: 3px solid #c0392b; outline-offset: 2px; }
+          .card-chips { display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:.4rem; }
+          .domain-chip, .status-chip { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:.7rem; border:1px solid; background:#f1f5f9; color:#334155; border-color:#cbd5e1; }
+          .domain-chip { background:#ecfeff; border-color:#a5f3fc; color:#155e75; }
+          .card-summary { font-size:.85rem; color:#475569; margin:.25rem 0 .5rem; line-height:1.4; }
         </style>
 
         <div class="grid">${cards}</div>
@@ -472,7 +508,9 @@ export function renderAdminList(data: {
     var all = form.querySelector('[data-bulk-all]');
     var countEl = form.querySelector('[data-bulk-count]');
     var submitBtn = form.querySelector('[data-bulk-submit]');
+    var ingestBtn = form.querySelector('[data-bulk-ingest]');
     var checks = form.querySelectorAll('[data-admin-check]');
+    var pendingAction = null;
 
     function refresh() {
       var n = 0;
@@ -481,9 +519,12 @@ export function renderAdminList(data: {
         var card = c.closest('[data-admin-card]');
         if (card) card.classList.toggle('is-selected', c.checked);
       });
-      countEl.textContent = n + (n === 1 ? ' selected' : ' selected');
-      submitBtn.disabled = n === 0;
-      submitBtn.style.opacity = n === 0 ? '.55' : '1';
+      countEl.textContent = n + ' selected';
+      [submitBtn, ingestBtn].forEach(function (b) {
+        if (!b) return;
+        b.disabled = n === 0;
+        b.style.opacity = n === 0 ? '.55' : '1';
+      });
       if (all) all.checked = n > 0 && n === checks.length;
     }
 
@@ -495,16 +536,27 @@ export function renderAdminList(data: {
     }
     checks.forEach(function (c) {
       c.addEventListener('change', refresh);
-      // prevent the surrounding <label> from toggling twice on direct checkbox click
       c.addEventListener('click', function (e) { e.stopPropagation(); });
     });
+
+    // remember which button kicked off the submit so we can show the right confirm
+    [submitBtn, ingestBtn].forEach(function (b) {
+      if (!b) return;
+      b.addEventListener('click', function () {
+        pendingAction = b === ingestBtn ? 'ingest' : 'delete';
+      });
+    });
+
     form.addEventListener('submit', function (e) {
       var n = form.querySelectorAll('[data-admin-check]:checked').length;
       if (n === 0) { e.preventDefault(); return false; }
-      if (!confirm('Delete ' + n + ' photo' + (n === 1 ? '' : 's') + ' permanently? This cannot be undone.')) {
-        e.preventDefault();
-        return false;
+      var msg;
+      if (pendingAction === 'ingest') {
+        msg = 'Re-run AI ingest on ' + n + ' photo' + (n === 1 ? '' : 's') + '? (uses DeepSeek API quota)';
+      } else {
+        msg = 'Delete ' + n + ' photo' + (n === 1 ? '' : 's') + ' permanently? This cannot be undone.';
       }
+      if (!confirm(msg)) { e.preventDefault(); return false; }
     });
     refresh();
   })();
@@ -527,4 +579,115 @@ export function renderError(message: string): string {
     </div>
   </section>`;
   return layout({ title: "Error — MuseIQ", body });
+}
+
+// ───────────────────────────── Wiki render ─────────────────────────────
+
+const DOMAIN_EMOJI: Record<string, string> = {
+  history: "🏺",
+  art: "🎨",
+  science: "🦖",
+  tech: "⚙️",
+  technology: "⚙️",
+  culture: "🌍",
+};
+
+function stripFrontmatter(body: string): string {
+  const m = body.match(/^---\s*\n[\s\S]*?\n---\s*\n?([\s\S]*)$/);
+  return m ? m[1] : body;
+}
+
+export function renderWikiPage(opts: {
+  user: string;
+  page: WikiPageRow;
+  imageSrc: string | null;
+}): string {
+  const { user, page, imageSrc } = opts;
+  let fm: Record<string, unknown> = {};
+  try {
+    fm = page.frontmatter_json ? JSON.parse(page.frontmatter_json) : {};
+  } catch { /* ignore */ }
+
+  const domain = typeof fm.domain === "string" ? fm.domain : null;
+  const secondary = Array.isArray(fm.secondary_domains)
+    ? (fm.secondary_domains as string[])
+    : [];
+  const period = typeof fm.period === "string" ? fm.period : null;
+  const place = typeof fm.place === "string" ? fm.place : null;
+  const approxYear = typeof fm.approx_year === "number" ? fm.approx_year : null;
+  const confidence = typeof fm.confidence === "number" ? fm.confidence : null;
+
+  const chips: string[] = [];
+  if (domain) chips.push(`<span class="chip chip-domain">${DOMAIN_EMOJI[domain] ?? ""} ${escapeHtml(domain)}</span>`);
+  for (const d of secondary) {
+    chips.push(`<span class="chip">${DOMAIN_EMOJI[d] ?? ""} ${escapeHtml(d)}</span>`);
+  }
+  if (period) chips.push(`<span class="chip"><a href="/wiki/${encodeURIComponent(user)}/periods/${encodeURIComponent(period)}">${escapeHtml(period)}</a></span>`);
+  if (place) chips.push(`<span class="chip"><a href="/wiki/${encodeURIComponent(user)}/places/${encodeURIComponent(place)}">${escapeHtml(place)}</a></span>`);
+  if (approxYear !== null) chips.push(`<span class="chip">${formatYear(approxYear)}</span>`);
+  if (confidence !== null && confidence < 0.5) chips.push(`<span class="chip" style="background:#fef3c7;border-color:#fcd34d;">low confidence (${confidence.toFixed(2)})</span>`);
+
+  const md = stripFrontmatter(page.body);
+  const html = renderMarkdown(md);
+
+  const meta = `<p class="muted" style="margin-top:2rem;font-size:.85rem;">Last updated by AI · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} outbound · ${page.inbound_links} inbound</p>`;
+
+  const imageHtml = imageSrc
+    ? `<figure class="wiki-figure"><img src="${imageSrc}" alt="${escapeHtml(page.title)}" /></figure>`
+    : "";
+
+  const body = `
+  <section class="wiki">
+    <div class="container wiki-container">
+      <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
+        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <span aria-hidden="true">›</span>
+        <span>${escapeHtml(page.kind)}</span>
+        <span aria-hidden="true">›</span>
+        <span>${escapeHtml(page.title)}</span>
+      </nav>
+      ${imageHtml}
+      ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
+      <article class="wiki-body">
+        ${html}
+      </article>
+      ${meta}
+    </div>
+  </section>
+  <style>
+    .wiki-container { max-width: 760px; }
+    .wiki-figure { margin: 0 0 1.5rem; }
+    .wiki-figure img { width:100%; max-height: 480px; object-fit: cover; border-radius: 1rem; }
+    .chips { display:flex; flex-wrap:wrap; gap:.4rem; margin: 0 0 1.25rem; }
+    .chip { display:inline-flex; align-items:center; gap:.25rem; padding:.18rem .55rem; border:1px solid var(--border,#e5e7eb); border-radius:999px; font-size:.8rem; background:var(--bg-elev,#fff); }
+    .chip a { color: inherit; text-decoration: none; }
+    .chip-domain { background: #ecfeff; border-color:#a5f3fc; }
+    .wiki-breadcrumb { font-size:.85rem; color:#64748b; margin: 0 0 1rem; display:flex; gap:.4rem; flex-wrap:wrap; }
+    .wiki-breadcrumb a { color: inherit; }
+    .wiki-body h1 { font-family: 'Fraunces', serif; font-size: 2.4rem; margin: .25rem 0 1rem; }
+    .wiki-body h2 { margin-top: 2rem; }
+    .wiki-body blockquote { border-left: 3px solid var(--accent,#0ea5e9); margin: 1.25rem 0; padding: .25rem 1rem; color: #334155; font-style: italic; background: rgba(14,165,233,.05); border-radius: 0 .5rem .5rem 0; }
+    .wiki-body ul li.task { list-style: none; margin-left: -1.25rem; }
+    .wiki-body a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  </style>`;
+  return layout({ title: `${page.title} — MuseIQ Wiki`, body });
+}
+
+export function renderWikiNotFound(opts: { user: string; path: string }): string {
+  const { user, path } = opts;
+  const body = `
+  <section class="error-screen">
+    <div class="container error-inner">
+      <p class="eyebrow">Wiki</p>
+      <h1>This page hasn't been written yet.</h1>
+      <p class="muted">No page at <code>${escapeHtml(path)}</code> for user <code>${escapeHtml(user)}</code>.</p>
+      <p>Try the <a href="/wiki/${encodeURIComponent(user)}/index">wiki index</a>, or capture more exhibits to grow this section.</p>
+    </div>
+  </section>`;
+  return layout({ title: "Wiki page not found — MuseIQ", body });
+}
+
+function formatYear(y: number): string {
+  if (y < 0) return `${Math.abs(y).toLocaleString()} BCE`;
+  return `${y} CE`;
 }
