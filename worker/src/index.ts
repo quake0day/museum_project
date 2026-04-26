@@ -17,6 +17,8 @@ import {
   renderWikiNotFound,
   renderWikiSearch,
   renderLintReport,
+  renderTimeline,
+  renderMap,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -32,6 +34,7 @@ import { ingestExhibit } from "./wiki/ingest";
 import { getWikiPage, getInboundLinks, wikiStats, searchWiki } from "./wiki/db";
 import { buildIndexPage, buildLogPage } from "./wiki/index_render";
 import { runLint } from "./wiki/lint";
+import { getMapPoints, getTimelinePoints } from "./wiki/views";
 
 export type Bindings = {
   DB: D1Database;
@@ -403,6 +406,30 @@ app.get("/wiki/:user/*", async (c) => {
     return c.html(renderWikiPage({ user, page, imageSrc, inbound }));
   } catch (err) {
     console.error("wiki render error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+// ───────────────────────────── /me views (timeline, map) ───────────────
+
+app.get("/me/timeline", async (c) => {
+  const user = defaultUserId(c.env);
+  try {
+    const points = await getTimelinePoints(c.env.DB, user);
+    return c.html(renderTimeline({ user, points }));
+  } catch (err) {
+    console.error("timeline error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+app.get("/me/map", async (c) => {
+  const user = defaultUserId(c.env);
+  try {
+    const points = await getMapPoints(c.env.DB, user);
+    return c.html(renderMap({ user, points }));
+  } catch (err) {
+    console.error("map error", err);
     return c.html(renderError(errMsg(err)), 500);
   }
 });

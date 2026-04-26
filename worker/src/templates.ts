@@ -49,6 +49,9 @@ function layout(opts: { title: string; active?: string; body: string }): string 
       <nav class="nav" aria-label="Primary">
         ${navLink("/", "Home", "home")}
         ${navLink("/interactions/view", "Interactions", "list")}
+        ${navLink("/wiki/default/index", "Wiki", "wiki")}
+        ${navLink("/me/timeline", "Timeline", "timeline")}
+        ${navLink("/me/map", "Map", "map")}
         <a href="https://github.com/quake0day/museum_project" target="_blank" rel="noreferrer">GitHub</a>
       </nav>
       <button class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
@@ -810,6 +813,142 @@ function sanitizeSnippet(s: string): string {
   return parts.map((p) => (p === "<mark>" || p === "</mark>") ? p : escapeHtml(p)).join("");
 }
 
+export function renderTimeline(opts: {
+  user: string;
+  points: Array<{ id: string; title: string; approx_year: number; primary_domain: string | null; child_summary: string | null }>;
+}): string {
+  const { user, points } = opts;
+
+  // Symmetric log-ish scale: signed_log(y) = sign(y) * log10(|y|+1)
+  // so we can fit -200,000,000 (fossils) to +2026 on one axis without
+  // collapsing the modern era.
+  const slog = (y: number) => Math.sign(y) * Math.log10(Math.abs(y) + 1);
+  const W = 1000;
+  const H = 360;
+  const padX = 60;
+  const xs = points.map((p) => slog(p.approx_year));
+  const yearStart = points.length ? Math.min(...xs) : -8;
+  const yearEnd = points.length ? Math.max(...xs) : 4;
+  const span = (yearEnd - yearStart) || 1;
+  const xOf = (y: number) => padX + ((slog(y) - yearStart) / span) * (W - 2 * padX);
+
+  // ticks at decade-of-magnitude breakpoints so axis stays readable
+  const tickYears = [-200_000_000, -100_000, -10_000, -2000, -500, 0, 1500, 1800, 1900, 2000];
+  const ticks = tickYears
+    .filter((t) => slog(t) >= yearStart - 0.1 && slog(t) <= yearEnd + 0.1)
+    .map((t) => `<g><line x1="${xOf(t)}" y1="${H - 50}" x2="${xOf(t)}" y2="${H - 30}" stroke="#cbd5e1" /><text x="${xOf(t)}" y="${H - 14}" text-anchor="middle" font-size="11" fill="#64748b">${formatYear(t)}</text></g>`)
+    .join("");
+
+  const domainColor: Record<string, string> = {
+    history: "#92400e",
+    art: "#a855f7",
+    science: "#10b981",
+    tech: "#0ea5e9",
+    technology: "#0ea5e9",
+    culture: "#f59e0b",
+  };
+
+  const pins = points.map((p, i) => {
+    const cx = xOf(p.approx_year);
+    // Stagger Y positions to avoid overlap when many points share an era
+    const cy = 80 + ((i * 31) % (H - 180));
+    const color = domainColor[p.primary_domain ?? ""] ?? "#475569";
+    const href = `/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(p.id)}`;
+    const tip = `${p.title} (${formatYear(p.approx_year)})${p.child_summary ? "\n" + p.child_summary : ""}`;
+    return `<a href="${href}"><circle cx="${cx}" cy="${cy}" r="6" fill="${color}" opacity=".85" stroke="#fff" stroke-width="1.5"><title>${escapeHtml(tip)}</title></circle></a>`;
+  }).join("");
+
+  const body = `
+  <section class="wiki">
+    <div class="container">
+      <h1>Timeline</h1>
+      <p class="muted">${points.length} dated exhibit${points.length === 1 ? "" : "s"} on a symmetric-log axis from prehistory to today.</p>
+      ${points.length === 0
+        ? `<p class="muted">No dated exhibits yet — once the AI assigns approx_year via ingest, pins will appear here.</p>`
+        : `<div class="timeline-wrap">
+            <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Timeline of captured exhibits">
+              <line x1="${padX}" y1="${H - 40}" x2="${W - padX}" y2="${H - 40}" stroke="#94a3b8" stroke-width="1" />
+              ${ticks}
+              ${pins}
+            </svg>
+          </div>
+          <p class="muted" style="font-size:.85rem;">Hover a pin for details, click to open its wiki page. Pin color = domain.</p>`
+      }
+    </div>
+  </section>
+  <style>
+    .timeline-wrap { overflow-x: auto; padding: .5rem 0; }
+    .timeline-wrap svg { width: 100%; min-width: 700px; height: auto; }
+  </style>`;
+  return layout({ title: "Timeline — MuseIQ", body });
+}
+
+export function renderMap(opts: {
+  user: string;
+  points: Array<{ id: string; title: string; lat: number; lon: number; primary_domain: string | null; child_summary: string | null }>;
+}): string {
+  const { user, points } = opts;
+  const ptJson = JSON.stringify(points.map((p) => ({
+    id: p.id, title: p.title, lat: p.lat, lon: p.lon,
+    domain: p.primary_domain ?? "",
+    summary: p.child_summary ?? "",
+  })));
+  const body = `
+  <section class="wiki">
+    <div class="container">
+      <h1>Map</h1>
+      <p class="muted">${points.length} located exhibit${points.length === 1 ? "" : "s"} from your wiki.</p>
+      ${points.length === 0
+        ? `<p class="muted">No located exhibits yet — once the AI assigns origin_lat/origin_lon via ingest, points will appear here.</p>`
+        : `<div id="map" style="height:540px;border-radius:1rem;overflow:hidden;border:1px solid var(--border,#e5e7eb);"></div>`
+      }
+    </div>
+  </section>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <script>
+    (function () {
+      var pts = ${ptJson};
+      if (!pts.length || typeof L === 'undefined') return;
+      var map = L.map('map').setView([20, 0], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 18,
+      }).addTo(map);
+      var emoji = { history: '🏺', art: '🎨', science: '🦖', tech: '⚙️', technology: '⚙️', culture: '🌍' };
+      var bounds = [];
+      pts.forEach(function (p) {
+        var m = L.marker([p.lat, p.lon]).addTo(map);
+        var e = emoji[p.domain] || '📍';
+        var summary = p.summary ? '<p style="margin:.4rem 0 0;font-size:.85rem;color:#475569;">' + escapeHtml(p.summary) + '</p>' : '';
+        m.bindPopup(
+          '<strong>' + e + ' ' + escapeHtml(p.title) + '</strong>' + summary +
+          '<p style="margin:.4rem 0 0;"><a href="/wiki/${encodeURIComponent(user)}/exhibits/' + encodeURIComponent(p.id) + '">Open wiki page →</a></p>'
+        );
+        bounds.push([p.lat, p.lon]);
+      });
+      if (bounds.length > 1) map.fitBounds(bounds, { padding: [40, 40] });
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+      }
+    })();
+  </script>`;
+  return layout({ title: "Map — MuseIQ", body });
+}
+
+function formatYear(y: number): string {
+  if (y === 0) return "0";
+  if (y < 0) {
+    const a = Math.abs(y);
+    if (a >= 1_000_000) return (a / 1_000_000).toFixed(0) + "M BCE";
+    if (a >= 1_000) return (a / 1_000).toFixed(0) + "k BCE";
+    return a + " BCE";
+  }
+  return y + " CE";
+}
+
 export function renderLintReport(opts: {
   user: string;
   findings: Array<{ severity: "info" | "warn" | "error"; category: string; path: string | null; message: string }>;
@@ -872,9 +1011,4 @@ export function renderWikiNotFound(opts: { user: string; path: string }): string
     </div>
   </section>`;
   return layout({ title: "Wiki page not found — MuseIQ", body });
-}
-
-function formatYear(y: number): string {
-  if (y < 0) return `${Math.abs(y).toLocaleString()} BCE`;
-  return `${y} CE`;
 }
