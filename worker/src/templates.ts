@@ -1964,9 +1964,7 @@ export function renderKnowledgeGraph(opts: {
       <div id="kg-wrap" class="kg-wrap">
         <svg id="kg-svg"></svg>
         <div id="kg-tip" class="kg-tip" hidden></div>
-        <p id="kg-empty" class="muted" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:2rem;" ${data.nodes.length ? "hidden" : ""}>
-          The graph is empty. Capture more exhibits and the AI will start linking concepts together here.
-        </p>
+        ${data.nodes.length === 0 ? `<div class="kg-empty"><p class="muted">The graph is empty. Capture more exhibits and the AI will start linking concepts together here.</p></div>` : ""}
       </div>
 
       <p class="muted" style="font-size:.85rem;margin-top:.75rem;">Tip: hover a node to see its label, click to open the page. Drag the canvas to pan. Drag a node to rearrange.</p>
@@ -2046,6 +2044,17 @@ export function renderKnowledgeGraph(opts: {
     .kg-node.is-dim { opacity: 0.18; }
     .kg-node.is-dim text { display: none; }
     .kg-edge.is-dim { stroke-opacity: 0.06; }
+
+    .kg-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+      pointer-events: none;
+    }
 
     .kg-tip {
       position: absolute;
@@ -2182,12 +2191,18 @@ export function renderKnowledgeGraph(opts: {
       });
     nodeSel.call(drag);
 
-    // Pan + zoom
+    // Pan + zoom. Filter out events whose target is inside a node so that
+    // mousedown on a node starts a drag (not a pan), and clicks on a node
+    // pass through to the click handler.
     var zoom = d3.zoom().scaleExtent([0.2, 4])
+      .filter(function (event) {
+        if (event.type === 'wheel') return true;
+        return !(event.target && event.target.closest && event.target.closest('.kg-node'));
+      })
       .on('zoom', function (event) {
         viewport.attr('transform', event.transform.toString());
       });
-    svg.call(zoom);
+    svg.call(zoom).on('dblclick.zoom', null);
     document.getElementById('kg-reset').addEventListener('click', function () {
       svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
     });
