@@ -1077,11 +1077,28 @@ in v0.5.
 Each version is shippable and demo-able. We will not start v(N+1) until v(N)
 is merged and live. Estimates assume one engineer.
 
-### v0.4 — Current ✅
+### v0.4 — Shipped ✅
 - iOS POST → R2 + D1
 - Public grid, search, pagination
-- Admin login + bulk delete (just shipped)
+- Admin login + bulk delete
 - DeepSeek API key configured as Cloudflare secret
+
+### Status overview (2026-04-26)
+
+| Version | Status | Live URL surfaces |
+|---|---|---|
+| v0.5 — AI ingest foundation | ✅ shipped | POST `/api/interactions/list` triggers ingest; admin Re-ingest |
+| v0.6 — Domain templates + entity pages | ✅ shipped | `/wiki/<user>/exhibits/<id>` + auto-created concept/place/period/etc pages |
+| v0.7 — index / log / search / lint / augment | ✅ shipped | `/wiki/<user>/index`, `/log`, `/_search`, `/admin/lint/<user>` |
+| v0.8 — Timeline + Map | ✅ shipped | `/me/timeline`, `/me/map` |
+| v0.9 — Quests + badges | ✅ shipped | `/me/quests`, 11 starter quests, auto-award on ingest |
+| v1.1 — Ask the wiki | ✅ shipped | `/wiki/<user>/_ask`, `POST /api/wiki/<user>/ask` |
+| v1.3 — Compare | ✅ shipped | `/wiki/<user>/_compare?a=…&b=…` |
+| v2.1 — Quizzes | ✅ shipped | `/wiki/<user>/_quiz?p=…` |
+| **v1.0 — Multi-user + auth** | 🛑 needs iOS + product | Requires iOS app to send `user_id`, child PIN flow, parent password flow — block on coordination |
+| **v1.2 — My Exhibition** | ⏸ deferred | Requires v1.0 (per-user ownership) to be meaningful |
+| **v2.0 — Teacher mode** | 🛑 needs business + v1.0 | Class accounts, roster, classroom integrations — needs product decisions |
+| **v2.2 — Public KB / cross-museum themes** | 🛑 needs moderation policy | Requires multi-user + content moderation framework |
 
 ### v0.5 — AI ingest foundation + first wiki page per exhibit (≈ 2.5 days)
 
