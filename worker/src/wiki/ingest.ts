@@ -217,6 +217,14 @@ async function ingestExhibitInner(
     )
     .run();
 
+  // 4.5 quest check (silent if nothing newly earned)
+  try {
+    const { checkAndAwardQuests } = await import("./quests");
+    await checkAndAwardQuests(db, input.userId);
+  } catch (e) {
+    console.error("quest check failed", e);
+  }
+
   // 5. append log
   await appendWikiLog(
     db,

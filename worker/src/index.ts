@@ -19,6 +19,7 @@ import {
   renderLintReport,
   renderTimeline,
   renderMap,
+  renderQuests,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -35,6 +36,7 @@ import { getWikiPage, getInboundLinks, wikiStats, searchWiki } from "./wiki/db";
 import { buildIndexPage, buildLogPage } from "./wiki/index_render";
 import { runLint } from "./wiki/lint";
 import { getMapPoints, getTimelinePoints } from "./wiki/views";
+import { evaluateQuests } from "./wiki/quests";
 
 export type Bindings = {
   DB: D1Database;
@@ -419,6 +421,17 @@ app.get("/me/timeline", async (c) => {
     return c.html(renderTimeline({ user, points }));
   } catch (err) {
     console.error("timeline error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+app.get("/me/quests", async (c) => {
+  const user = defaultUserId(c.env);
+  try {
+    const quests = await evaluateQuests(c.env.DB, user);
+    return c.html(renderQuests({ user, quests }));
+  } catch (err) {
+    console.error("quests error", err);
     return c.html(renderError(errMsg(err)), 500);
   }
 });

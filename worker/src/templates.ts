@@ -52,6 +52,7 @@ function layout(opts: { title: string; active?: string; body: string }): string 
         ${navLink("/wiki/default/index", "Wiki", "wiki")}
         ${navLink("/me/timeline", "Timeline", "timeline")}
         ${navLink("/me/map", "Map", "map")}
+        ${navLink("/me/quests", "Quests", "quests")}
         <a href="https://github.com/quake0day/museum_project" target="_blank" rel="noreferrer">GitHub</a>
       </nav>
       <button class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
@@ -811,6 +812,62 @@ function sanitizeSnippet(s: string): string {
   // FTS5 snippet emits text with <mark>…</mark>. Escape everything else.
   const parts = s.split(/(<\/?mark>)/g);
   return parts.map((p) => (p === "<mark>" || p === "</mark>") ? p : escapeHtml(p)).join("");
+}
+
+export function renderQuests(opts: {
+  user: string;
+  quests: Array<{ id: string; title: string; description: string; emoji: string; current: number; target: number; hint?: string; completed: boolean; earnedAt?: string }>;
+}): string {
+  const { quests } = opts;
+  const earned = quests.filter((q) => q.earnedAt).length;
+  const inProgress = quests.filter((q) => !q.earnedAt && q.current > 0);
+  const locked = quests.filter((q) => !q.earnedAt && q.current === 0);
+
+  const card = (q: typeof quests[number]) => {
+    const pct = Math.min(100, Math.round((q.current / Math.max(1, q.target)) * 100));
+    const tone = q.completed
+      ? "background:#dcfce7;border-color:#86efac;"
+      : q.current > 0
+      ? "background:#fef9c3;border-color:#fde047;"
+      : "background:var(--bg-elev,#fff);";
+    return `
+    <article class="quest" style="${tone}">
+      <div class="quest-emoji">${q.emoji}</div>
+      <div class="quest-body">
+        <h3>${escapeHtml(q.title)} ${q.earnedAt ? `<span class="earned">earned ${escapeHtml((q.earnedAt || "").slice(0, 10))}</span>` : ""}</h3>
+        <p class="quest-desc">${escapeHtml(q.description)}</p>
+        <div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;"></div></div>
+        <p class="quest-progress">${q.current} / ${q.target}${q.hint && !q.completed ? ` <span class="muted">· ${escapeHtml(q.hint)}</span>` : ""}</p>
+      </div>
+    </article>`;
+  };
+
+  const body = `
+  <section class="wiki">
+    <div class="container" style="max-width: 820px;">
+      <header style="margin-bottom: 1.5rem;">
+        <p class="eyebrow">Junior Curator</p>
+        <h1>Quests &amp; badges</h1>
+        <p class="muted">${earned} of ${quests.length} earned · ${inProgress.length} in progress</p>
+      </header>
+      ${earned ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">Earned (${earned})</h2><div class="quest-grid">${quests.filter((q) => q.earnedAt).map(card).join("")}</div>` : ""}
+      ${inProgress.length ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">In progress (${inProgress.length})</h2><div class="quest-grid">${inProgress.map(card).join("")}</div>` : ""}
+      ${locked.length ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">Up next (${locked.length})</h2><div class="quest-grid">${locked.map(card).join("")}</div>` : ""}
+    </div>
+  </section>
+  <style>
+    .quest-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+    .quest { display:flex; gap: 1rem; padding: 1rem; border: 1px solid var(--border,#e5e7eb); border-radius: .75rem; }
+    .quest-emoji { font-size: 2rem; line-height: 1; }
+    .quest-body { flex:1; }
+    .quest h3 { margin: 0 0 .25rem; font-size: 1.05rem; display:flex; gap:.5rem; align-items:baseline; flex-wrap:wrap; }
+    .quest h3 .earned { font-size:.7rem; padding: .1rem .5rem; border-radius: 999px; background:#16a34a; color:#fff; font-weight:500; }
+    .quest-desc { margin: 0 0 .5rem; font-size: .9rem; color:#475569; }
+    .quest-bar { height: 6px; background: rgba(0,0,0,.08); border-radius: 999px; overflow: hidden; margin: .35rem 0; }
+    .quest-bar-fill { height: 100%; background: linear-gradient(90deg,#0ea5e9,#22d3ee); border-radius: 999px; transition: width .3s ease; }
+    .quest-progress { margin: .25rem 0 0; font-size: .82rem; color: #334155; }
+  </style>`;
+  return layout({ title: "Quests — MuseIQ", body });
 }
 
 export function renderTimeline(opts: {
