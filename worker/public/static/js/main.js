@@ -27,16 +27,30 @@
   });
 
   // ───────────── Lightbox ─────────────
+  // Triggers: any element with [data-lightbox-trigger]. Required attrs:
+  //   data-src       — image URL
+  //   data-caption   — optional caption text
+  //   data-href      — optional link to "open the related page" inside the lightbox
   const lightbox = document.querySelector('[data-lightbox]');
   if (lightbox) {
     const img = lightbox.querySelector('[data-lightbox-img]');
     const caption = lightbox.querySelector('[data-lightbox-caption]');
+    const link = lightbox.querySelector('[data-lightbox-link]');
     const closeBtn = lightbox.querySelector('[data-lightbox-close]');
 
-    const open = (src, cap) => {
+    const open = (src, cap, href) => {
       img.src = src;
       img.alt = cap || '';
       if (caption) caption.textContent = cap || '';
+      if (link) {
+        if (href) {
+          link.setAttribute('href', href);
+          link.hidden = false;
+        } else {
+          link.removeAttribute('href');
+          link.hidden = true;
+        }
+      }
       lightbox.hidden = false;
       lightbox.setAttribute('aria-hidden', 'false');
       document.body.style.overflow = 'hidden';
@@ -55,12 +69,15 @@
         e.preventDefault();
         const src = el.getAttribute('data-src');
         const cap = el.getAttribute('data-caption') || '';
-        if (src) open(src, cap);
+        const href = el.getAttribute('data-href') || '';
+        if (src) open(src, cap, href);
       });
     });
 
     closeBtn?.addEventListener('click', close);
     lightbox.addEventListener('click', (e) => {
+      // Don't close when the user clicks the figcaption's wiki-page link.
+      if (e.target.closest && e.target.closest('[data-lightbox-link]')) return;
       if (e.target === lightbox || e.target === img.parentElement) close();
     });
     document.addEventListener('keydown', (e) => {

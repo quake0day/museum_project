@@ -69,6 +69,18 @@ function layout(opts: { title: string; active?: string; body: string }): string 
     </div>
   </header>
   <main id="main">${opts.body}</main>
+  <div class="lightbox" data-lightbox hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Image viewer">
+    <button class="lightbox-close" type="button" aria-label="Close" data-lightbox-close>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <figure class="lightbox-figure">
+      <img data-lightbox-img alt="" />
+      <figcaption>
+        <span data-lightbox-caption></span>
+        <a class="lightbox-open" data-lightbox-link hidden>Open wiki page →</a>
+      </figcaption>
+    </figure>
+  </div>
   <footer class="site-footer">
     <div class="container footer-inner">
       <span>© ${new Date().getFullYear()} MuseIQ</span>
@@ -568,15 +580,6 @@ export function renderList(data: {
     .card-meta { font-size: .78rem; color: var(--ink-muted); }
     .card .domain-chip { margin-bottom: .35rem; }
   </style>
-  <div class="lightbox" data-lightbox hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Image viewer">
-    <button class="lightbox-close" type="button" aria-label="Close" data-lightbox-close>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-    </button>
-    <figure class="lightbox-figure">
-      <img data-lightbox-img alt="" />
-      <figcaption data-lightbox-caption></figcaption>
-    </figure>
-  </div>
   `;
   return layout({
     title: query ? `"${query}" — Interactions` : "Interactions — MuseIQ",
@@ -929,6 +932,43 @@ export function renderWikiPage(opts: {
       <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">💬 Ask the wiki</a>
     </div>`;
 
+  // Place pages get an inline mini-map. Pulls lat/lon from frontmatter if
+  // present; falls back to nothing if missing.
+  let placeMapHtml = "";
+  if (page.kind === "place" || page.kind === "civilization") {
+    let fmLat: number | null = null;
+    let fmLon: number | null = null;
+    try {
+      const f = page.frontmatter_json ? JSON.parse(page.frontmatter_json) : {};
+      if (typeof f.lat === "number") fmLat = f.lat;
+      if (typeof f.lon === "number") fmLon = f.lon;
+    } catch { /* ignore */ }
+    if (fmLat !== null && fmLon !== null) {
+      placeMapHtml = `
+      <section class="wiki-map" aria-label="Where this is on the map">
+        <h3>📍 On the map</h3>
+        <div id="wiki-place-map" data-lat="${fmLat}" data-lon="${fmLon}" data-title="${escapeHtml(page.title)}"></div>
+      </section>
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+      <script>
+        (function () {
+          var el = document.getElementById('wiki-place-map');
+          if (!el || typeof L === 'undefined') return;
+          var lat = parseFloat(el.dataset.lat);
+          var lon = parseFloat(el.dataset.lon);
+          if (!isFinite(lat) || !isFinite(lon)) return;
+          var m = L.map(el, { scrollWheelZoom: false }).setView([lat, lon], 5);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 18,
+          }).addTo(m);
+          L.marker([lat, lon]).addTo(m).bindPopup(el.dataset.title || '').openPopup();
+        })();
+      </script>`;
+    }
+  }
+
   // 2-hop co-occurrence strip — entities that share exhibits with this one
   // even if the LLM didn't link them directly.
   const relatedHtml = related.length
@@ -980,7 +1020,13 @@ export function renderWikiPage(opts: {
           const href = `/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(p.exhibit_id)}`;
           const dom = p.primary_domain ?? "";
           const tip = (p.title || "").trim();
-          return `<a class="wiki-thumb${i >= GALLERY_INITIAL ? " is-extra" : ""} domain-${escapeHtml(dom)}" href="${href}" title="${escapeHtml(tip)}"${i >= GALLERY_INITIAL ? ' hidden' : ''}>
+          return `<a class="wiki-thumb${i >= GALLERY_INITIAL ? " is-extra" : ""} domain-${escapeHtml(dom)}"
+                     href="${href}"
+                     data-lightbox-trigger
+                     data-src="${src}"
+                     data-caption="${escapeHtml(tip)}"
+                     data-href="${href}"
+                     title="${escapeHtml(tip)}"${i >= GALLERY_INITIAL ? ' hidden' : ''}>
             <img src="${src}" alt="${escapeHtml(tip)}" loading="lazy" decoding="async" />
             <span class="wiki-thumb-cap">${escapeHtml(tip)}</span>
           </a>`;
@@ -990,7 +1036,11 @@ export function renderWikiPage(opts: {
     : "";
 
   const imageHtml = imageSrc
-    ? `<figure class="wiki-hero-img"><img src="${imageSrc}" alt="${escapeHtml(page.title)}" /></figure>`
+    ? `<figure class="wiki-hero-img">
+        <a href="${imageSrc}" data-lightbox-trigger data-src="${imageSrc}" data-caption="${escapeHtml(page.title)}" aria-label="Enlarge photo">
+          <img src="${imageSrc}" alt="${escapeHtml(page.title)}" />
+        </a>
+      </figure>`
     : "";
 
   const body = `
@@ -1018,6 +1068,7 @@ export function renderWikiPage(opts: {
       <article class="wiki-body">
         ${html}
       </article>
+      ${placeMapHtml}
       ${galleryHtml}
       ${relatedHtml}
       ${inboundHtml}
@@ -1045,12 +1096,20 @@ export function renderWikiPage(opts: {
       align-items: start;
     }
     .wiki-hero-img { margin: 0; }
+    .wiki-hero-img a {
+      display: block;
+      cursor: zoom-in;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-md);
+      transition: transform .15s ease;
+    }
+    .wiki-hero-img a:hover { transform: scale(1.01); }
     .wiki-hero-img img {
       width: 100%;
       aspect-ratio: 4/3;
       object-fit: cover;
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-md);
+      display: block;
     }
     .wiki-hero-text h1 {
       font-family: 'Fraunces', serif;
@@ -1153,6 +1212,27 @@ export function renderWikiPage(opts: {
     }
     .wiki-body a:hover { color: var(--primary); text-decoration-color: var(--primary); }
 
+    .wiki-map {
+      margin: 2rem 0 0;
+      padding: 1rem 1.25rem 1.25rem;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+    .wiki-map h3 {
+      margin: 0 0 .75rem;
+      font-size: 1.05rem;
+      font-family: 'Fraunces', serif;
+      color: var(--primary);
+    }
+    .wiki-map > div {
+      height: 320px;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
     .wiki-gallery {
       margin: 2.5rem 0 1rem;
       padding: 1.25rem 1.25rem 1rem;
@@ -1192,6 +1272,7 @@ export function renderWikiPage(opts: {
       text-decoration: none;
       color: inherit;
       isolation: isolate;
+      cursor: zoom-in;
     }
     .wiki-thumb img {
       width: 100%;
@@ -2158,15 +2239,30 @@ export function renderKnowledgeGraph(opts: {
       window.location.href = '/wiki/${user}/' + d.id.split('/').map(encodeURIComponent).join('/');
     });
 
+    // Soft clamp so nodes never escape the viewport — keeps everything
+    // clickable + visible without needing the user to zoom out.
+    var pad = 24;
+    function clampX(x, r) { return Math.max(pad + r, Math.min(W - pad - r, x)); }
+    function clampY(y, r) { return Math.max(pad + r, Math.min(H - pad - r, y)); }
+
     var sim = d3.forceSimulation(nodes)
       .force('link', d3.forceLink(links).id(function (d) { return d.id; })
-        .distance(function (l) { return 60 + 24 / (l.weight + 1); })
-        .strength(function (l) { return Math.min(0.9, 0.15 + l.weight * 0.08); }))
-      .force('charge', d3.forceManyBody().strength(-220))
+        .distance(function (l) { return 36 + 18 / (l.weight + 1); })
+        .strength(function (l) { return Math.min(0.85, 0.1 + l.weight * 0.06); }))
+      // Weaker repulsion; with 500 nodes the previous -220 was throwing
+      // peripheral nodes off-canvas.
+      .force('charge', d3.forceManyBody().strength(-90).distanceMax(280))
       .force('center', d3.forceCenter(W / 2, H / 2))
-      .force('collide', d3.forceCollide().radius(function (d) { return radius(d) + 14; }))
-      .alphaDecay(0.04)
+      .force('x', d3.forceX(W / 2).strength(0.04))
+      .force('y', d3.forceY(H / 2).strength(0.04))
+      .force('collide', d3.forceCollide().radius(function (d) { return radius(d) + 6; }))
+      .alphaDecay(0.045)
       .on('tick', function () {
+        nodes.forEach(function (n) {
+          var r = radius(n);
+          n.x = clampX(n.x, r);
+          n.y = clampY(n.y, r);
+        });
         linkSel
           .attr('x1', function (d) { return d.source.x; })
           .attr('y1', function (d) { return d.source.y; })
