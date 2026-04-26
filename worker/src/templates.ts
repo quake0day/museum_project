@@ -1,6 +1,7 @@
 import type { InteractionRow, Stats } from "./db";
 import { escapeHtml, formatDate } from "./util";
 import type { WikiPageRow, WikiSearchHit } from "./wiki/db";
+import type { DashboardData } from "./wiki/dashboard";
 import { renderMarkdown } from "./wiki/render";
 
 function layout(opts: { title: string; active?: string; body: string }): string {
@@ -48,13 +49,15 @@ function layout(opts: { title: string; active?: string; body: string }): string 
       </a>
       <nav class="nav" aria-label="Primary">
         ${navLink("/", "Home", "home")}
-        ${navLink("/interactions/view", "Interactions", "list")}
-        ${navLink("/wiki/default/index", "Wiki", "wiki")}
+        ${navLink("/wiki/default/index", "My Wiki", "wiki")}
         ${navLink("/me/timeline", "Timeline", "timeline")}
         ${navLink("/me/map", "Map", "map")}
         ${navLink("/me/quests", "Quests", "quests")}
-        <a href="https://github.com/quake0day/museum_project" target="_blank" rel="noreferrer">GitHub</a>
+        ${navLink("/interactions/view", "Captures", "list")}
       </nav>
+      <a class="nav-icon" href="/wiki/default/_search" title="Search the wiki" aria-label="Search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </a>
       <button class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
         <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
         <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -73,6 +76,222 @@ function layout(opts: { title: string; active?: string; body: string }): string 
 </body>
 </html>`;
 }
+
+export function renderStudentHome(opts: { user: string; data: DashboardData }): string {
+  const { user, data } = opts;
+  const { totals, recent, inProgress, earnedRecent, nextAdventure } = data;
+
+  const hour = new Date().getHours();
+  const greeting = hour < 5 ? "Still up?" : hour < 12 ? "Good morning" : hour < 18 ? "Welcome back" : "Good evening";
+
+  const recentCard = (r: typeof recent[number]) => {
+    const src = "/media/" + r.image.split("/").map(encodeURIComponent).join("/");
+    const href = `/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(r.id)}`;
+    const dom = r.primary_domain ?? "";
+    const emoji = DOMAIN_EMOJI[dom] ?? "✨";
+    return `<a class="dash-recent-card domain-${escapeHtml(dom)}" href="${href}">
+      <div class="dash-recent-img"><img src="${src}" alt="${escapeHtml(r.title ?? "")}" loading="lazy" /></div>
+      <div class="dash-recent-body">
+        <span class="domain-chip">${emoji} ${escapeHtml(dom || "exhibit")}</span>
+        <h3>${escapeHtml(r.title)}</h3>
+        ${r.child_summary ? `<p>${escapeHtml(r.child_summary)}</p>` : ""}
+      </div>
+    </a>`;
+  };
+
+  const questBar = (q: typeof inProgress[number]) => {
+    const pct = Math.min(100, Math.round((q.current / Math.max(1, q.target)) * 100));
+    return `<a href="/me/quests" class="dash-quest">
+      <div class="dash-quest-emoji">${q.emoji}</div>
+      <div class="dash-quest-body">
+        <div class="dash-quest-row">
+          <strong>${escapeHtml(q.title)}</strong>
+          <span class="muted">${q.current} / ${q.target}</span>
+        </div>
+        <div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;"></div></div>
+      </div>
+    </a>`;
+  };
+
+  const body = `
+  <section class="dash-hero">
+    <div class="container dash-hero-inner">
+      <div>
+        <p class="eyebrow">${escapeHtml(greeting)}, Junior Curator</p>
+        <h1>Your museum, growing one capture at a time.</h1>
+        <p class="lede">A personal wiki of every exhibit you've photographed, organized by what it teaches — not by where you found it.</p>
+      </div>
+      <div class="dash-stats" aria-label="Collection at a glance">
+        <div class="dash-stat"><dt>Exhibits</dt><dd>${totals.exhibits.toLocaleString()}</dd></div>
+        <div class="dash-stat"><dt>Concepts</dt><dd>${totals.concepts.toLocaleString()}</dd></div>
+        <div class="dash-stat"><dt>Places</dt><dd>${totals.places.toLocaleString()}</dd></div>
+        <div class="dash-stat"><dt>Periods</dt><dd>${totals.periods.toLocaleString()}</dd></div>
+        ${totals.pending > 0 ? `<div class="dash-stat dash-stat-pending"><dt>Pending AI</dt><dd>${totals.pending.toLocaleString()}</dd></div>` : ""}
+      </div>
+    </div>
+  </section>
+
+  <section class="dash-block">
+    <div class="container">
+      <a href="${nextAdventure.href}" class="dash-next">
+        <div class="dash-next-emoji" aria-hidden="true">${nextAdventure.emoji}</div>
+        <div class="dash-next-body">
+          <p class="eyebrow">Next adventure</p>
+          <h2>${escapeHtml(nextAdventure.title)}</h2>
+          <p>${escapeHtml(nextAdventure.hint)}</p>
+        </div>
+        <span class="dash-next-arrow" aria-hidden="true">→</span>
+      </a>
+    </div>
+  </section>
+
+  ${recent.length ? `
+  <section class="dash-block">
+    <div class="container">
+      <header class="dash-block-head">
+        <h2>Recently captured</h2>
+        <a href="/interactions/view" class="muted">all captures →</a>
+      </header>
+      <div class="dash-recent-grid">
+        ${recent.slice(0, 4).map(recentCard).join("")}
+      </div>
+    </div>
+  </section>` : ""}
+
+  ${inProgress.length ? `
+  <section class="dash-block">
+    <div class="container">
+      <header class="dash-block-head">
+        <h2>Quests in progress</h2>
+        <a href="/me/quests" class="muted">all quests →</a>
+      </header>
+      <div class="dash-quest-list">
+        ${inProgress.map(questBar).join("")}
+      </div>
+    </div>
+  </section>` : ""}
+
+  ${earnedRecent.length ? `
+  <section class="dash-block">
+    <div class="container">
+      <header class="dash-block-head">
+        <h2>Badges earned</h2>
+        <a href="/me/quests" class="muted">all badges →</a>
+      </header>
+      <div class="dash-badges">
+        ${earnedRecent.map((q) => `<a class="dash-badge" href="/me/quests" title="${escapeHtml(q.description)}">
+          <div class="dash-badge-emoji">${q.emoji}</div>
+          <div>
+            <strong>${escapeHtml(q.title)}</strong>
+            <small class="muted">${q.earnedAt ? "earned " + escapeHtml(q.earnedAt.slice(0, 10)) : ""}</small>
+          </div>
+        </a>`).join("")}
+      </div>
+    </div>
+  </section>` : ""}
+
+  <section class="dash-block">
+    <div class="container">
+      <header class="dash-block-head"><h2>Explore your wiki</h2></header>
+      <div class="dash-explore-grid">
+        <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/index">
+          <span class="dash-explore-emoji">📚</span>
+          <strong>All pages</strong>
+          <small>Browse every exhibit, concept, place, period, person, and theme.</small>
+        </a>
+        <a class="dash-explore" href="/me/timeline">
+          <span class="dash-explore-emoji">⏳</span>
+          <strong>Timeline</strong>
+          <small>See your captures along an axis from prehistory to today.</small>
+        </a>
+        <a class="dash-explore" href="/me/map">
+          <span class="dash-explore-emoji">🗺️</span>
+          <strong>Map</strong>
+          <small>Where in the world your exhibits come from.</small>
+        </a>
+        <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/_search">
+          <span class="dash-explore-emoji">🔍</span>
+          <strong>Search</strong>
+          <small>Find any page in your wiki by keyword.</small>
+        </a>
+        <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/_ask">
+          <span class="dash-explore-emoji">💬</span>
+          <strong>Ask the wiki</strong>
+          <small>Curious about something? The wiki answers with citations.</small>
+        </a>
+        <a class="dash-explore" href="/me/quests">
+          <span class="dash-explore-emoji">🏅</span>
+          <strong>Quests</strong>
+          <small>Missions and badges to guide your next museum visit.</small>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .dash-hero { background: var(--bg-hero); padding: 3rem 0 2.5rem; border-bottom: 1px solid var(--border); }
+    .dash-hero-inner { display: grid; grid-template-columns: 1.6fr 1fr; gap: 3rem; align-items: end; }
+    .dash-hero h1 { font-size: clamp(1.8rem, 3.6vw, 2.6rem); margin: .35rem 0 .75rem; max-width: 22ch; }
+    .dash-hero .lede { color: var(--ink-soft); font-size: 1.05rem; max-width: 50ch; }
+    .dash-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; }
+    .dash-stat { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: .85rem 1rem; box-shadow: var(--shadow-sm); }
+    .dash-stat dt { font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-muted); margin: 0; }
+    .dash-stat dd { font-family: 'Fraunces', serif; font-size: 1.6rem; margin: .15rem 0 0; color: var(--primary); }
+    .dash-stat-pending dd { color: var(--accent-ink); }
+    @media (max-width: 800px) { .dash-hero-inner { grid-template-columns: 1fr; gap: 1.5rem; } }
+
+    .dash-block { padding: 2rem 0; }
+    .dash-block-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1rem; }
+    .dash-block-head h2 { font-size: 1.4rem; }
+
+    .dash-next { display: grid; grid-template-columns: 64px 1fr 32px; align-items: center; gap: 1.25rem; padding: 1.25rem 1.5rem; background: var(--bg-elev); border: 1px solid var(--border); border-left: 5px solid var(--accent); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); color: inherit; }
+    .dash-next:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
+    .dash-next-emoji { font-size: 2.6rem; line-height: 1; }
+    .dash-next-body h2 { font-size: 1.25rem; margin: .15rem 0 .25rem; color: var(--ink); }
+    .dash-next-body p { color: var(--ink-soft); }
+    .dash-next-arrow { font-size: 1.5rem; color: var(--accent); }
+
+    .dash-recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+    .dash-recent-card { display: flex; flex-direction: column; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); color: inherit; transition: transform .15s ease, box-shadow .15s ease; }
+    .dash-recent-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    .dash-recent-img { aspect-ratio: 4/3; overflow: hidden; background: var(--bg-soft); }
+    .dash-recent-img img { width: 100%; height: 100%; object-fit: cover; }
+    .dash-recent-body { padding: .85rem 1rem 1rem; }
+    .dash-recent-body h3 { font-family: 'Fraunces', serif; font-size: 1.05rem; margin: .35rem 0 .35rem; color: var(--ink); }
+    .dash-recent-body p { font-size: .88rem; color: var(--ink-soft); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+    .dash-quest-list { display: grid; gap: .65rem; }
+    .dash-quest { display: grid; grid-template-columns: 48px 1fr; gap: 1rem; align-items: center; padding: .85rem 1rem; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); color: inherit; }
+    .dash-quest:hover { border-color: var(--primary); }
+    .dash-quest-emoji { font-size: 1.8rem; line-height: 1; }
+    .dash-quest-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .35rem; }
+    .quest-bar { height: 6px; background: rgba(30, 58, 95, 0.08); border-radius: 999px; overflow: hidden; }
+    .quest-bar-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); }
+
+    .dash-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .65rem; }
+    .dash-badge { display: flex; gap: .85rem; align-items: center; padding: .85rem 1rem; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: var(--radius); color: var(--accent-ink); }
+    .dash-badge:hover { color: var(--accent-ink); }
+    .dash-badge-emoji { font-size: 1.8rem; line-height: 1; }
+    .dash-badge small { display: block; font-size: .72rem; color: color-mix(in srgb, var(--accent-ink) 70%, transparent); }
+
+    .dash-explore-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .65rem; }
+    .dash-explore { display: flex; flex-direction: column; gap: .25rem; padding: 1rem 1.15rem; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); color: inherit; transition: transform .15s ease, border-color .15s ease; }
+    .dash-explore:hover { transform: translateY(-1px); border-color: var(--primary); color: var(--primary); }
+    .dash-explore-emoji { font-size: 1.5rem; line-height: 1; margin-bottom: .35rem; }
+    .dash-explore strong { font-size: 1rem; }
+    .dash-explore small { font-size: .82rem; color: var(--ink-muted); line-height: 1.4; }
+  </style>`;
+  return layout({ title: "MuseIQ — Junior Curator AI", active: "home", body });
+}
+
+const DOMAIN_EMOJI: Record<string, string> = {
+  history: "🏺",
+  art: "🎨",
+  science: "🦖",
+  tech: "⚙️",
+  technology: "⚙️",
+  culture: "🌍",
+};
 
 export function renderHome(data: { stats: Stats }): string {
   const s = data.stats;
@@ -227,9 +446,10 @@ export function renderList(data: {
             : null;
           // When the wiki page exists, the whole card becomes a link to it.
           // Otherwise the lightbox-trigger keeps its zoom-on-click behavior.
+          const domainCls = domain ? `domain-${escapeHtml(domain)}` : "";
           const cardOpen = wikiHref
-            ? `<a class="card card-link" href="${wikiHref}">`
-            : `<article class="card" data-lightbox-trigger data-src="${src}" data-caption="${escapeHtml(it.response ?? "")}">`;
+            ? `<a class="card card-link ${domainCls}" href="${wikiHref}">`
+            : `<article class="card ${domainCls}" data-lightbox-trigger data-src="${src}" data-caption="${escapeHtml(it.response ?? "")}">`;
           const cardClose = wikiHref ? `</a>` : `</article>`;
           return `
       ${cardOpen}
@@ -237,10 +457,10 @@ export function renderList(data: {
           <img src="${src}" alt="Exhibit response" loading="lazy" decoding="async" />
         </div>
         <div class="card-body">
-          ${domain ? `<span class="card-domain">${domainEmoji} ${escapeHtml(domain)}</span>` : ""}
+          ${domain ? `<span class="domain-chip">${domainEmoji} ${escapeHtml(domain)}</span>` : ""}
           ${summary ? `<p class="card-summary">${summary}</p>` : ""}
           <p class="card-response">${full || '<span class="muted">(no description)</span>'}</p>
-          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time>${wikiHref ? ` · <span>open wiki →</span>` : ""}</p>
+          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time>${wikiHref ? ` · <span class="card-go">open wiki →</span>` : ""}</p>
         </div>
       ${cardClose}`;
         })
@@ -335,10 +555,14 @@ export function renderList(data: {
   </section>
 
   <style>
-    .card-link { color: inherit; text-decoration: none; display: flex; flex-direction: column; }
-    .card-link:hover { transform: translateY(-2px); transition: transform .15s ease; }
-    .card-domain { display:inline-block; font-size:.7rem; padding:.1rem .5rem; border-radius:999px; background:#ecfeff; border:1px solid #a5f3fc; color:#155e75; margin-bottom:.4rem; }
-    .card-summary { font-size:.9rem; color:#475569; margin: 0 0 .5rem; line-height:1.4; }
+    .card-link { color: inherit; text-decoration: none; display: flex; flex-direction: column; transition: transform .15s ease, box-shadow .15s ease; }
+    .card-link:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    .card.card-link:hover { color: inherit; }
+    .card-summary { font-size:.92rem; color: var(--ink-soft); margin: .5rem 0 .35rem; line-height:1.45; font-weight: 500; }
+    .card-response { font-size:.85rem; color: var(--ink-muted); margin: 0 0 .35rem; line-height: 1.4; font-style: italic; }
+    .card-go { color: var(--accent-ink); font-weight: 500; }
+    .card-meta { font-size: .78rem; color: var(--ink-muted); }
+    .card .domain-chip { margin-bottom: .35rem; }
   </style>
   <div class="lightbox" data-lightbox hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Image viewer">
     <button class="lightbox-close" type="button" aria-label="Close" data-lightbox-close>
@@ -612,15 +836,6 @@ export function renderError(message: string): string {
 
 // ───────────────────────────── Wiki render ─────────────────────────────
 
-const DOMAIN_EMOJI: Record<string, string> = {
-  history: "🏺",
-  art: "🎨",
-  science: "🦖",
-  tech: "⚙️",
-  technology: "⚙️",
-  culture: "🌍",
-};
-
 function stripFrontmatter(body: string): string {
   const m = body.match(/^---\s*\n[\s\S]*?\n---\s*\n?([\s\S]*)$/);
   return m ? m[1] : body;
@@ -648,25 +863,48 @@ export function renderWikiPage(opts: {
   const approxYear = typeof fm.approx_year === "number" ? fm.approx_year : null;
   const confidence = typeof fm.confidence === "number" ? fm.confidence : null;
 
-  const chips: string[] = [];
-  if (domain) chips.push(`<span class="chip chip-domain">${DOMAIN_EMOJI[domain] ?? ""} ${escapeHtml(domain)}</span>`);
-  for (const d of secondary) {
-    chips.push(`<span class="chip">${DOMAIN_EMOJI[d] ?? ""} ${escapeHtml(d)}</span>`);
-  }
-  if (period) chips.push(`<span class="chip"><a href="/wiki/${encodeURIComponent(user)}/periods/${encodeURIComponent(period)}">${escapeHtml(period)}</a></span>`);
-  if (place) chips.push(`<span class="chip"><a href="/wiki/${encodeURIComponent(user)}/places/${encodeURIComponent(place)}">${escapeHtml(place)}</a></span>`);
-  if (approxYear !== null) chips.push(`<span class="chip">${formatYear(approxYear)}</span>`);
-  if (confidence !== null && confidence < 0.5) chips.push(`<span class="chip" style="background:#fef3c7;border-color:#fcd34d;">low confidence (${confidence.toFixed(2)})</span>`);
+  // Age-graded summaries — fall through to whatever exists.
+  const sum_5_7   = typeof fm.summary_5_7   === "string" ? fm.summary_5_7   : null;
+  const sum_8_10  = typeof fm.summary_8_10  === "string" ? fm.summary_8_10  : null;
+  const sum_11_13 = typeof fm.summary_11_13 === "string" ? fm.summary_11_13 : null;
+  const hasAgeSummaries = !!(sum_5_7 || sum_8_10 || sum_11_13);
 
+  const isExhibit = page.kind === "exhibit" || page.kind === "exhibit_unknown";
+  const domainClass = domain ? `domain-${escapeHtml(domain)}` : "";
+
+  // Strip the body's leading H1 + opening blockquote — we hoist them into
+  // the hero so the body reads cleanly. Also strip frontmatter.
   const md = stripFrontmatter(page.body);
-  const html = renderMarkdown(md);
+  const { quote: heroQuote, body: trimmedBody } = extractLeadingQuote(md);
+  const html = renderMarkdown(stripLeadingHeading(trimmedBody, page.title));
 
-  const meta = `<p class="muted" style="margin-top:2rem;font-size:.85rem;">Last updated by AI · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} outbound · ${page.inbound_links} inbound</p>`;
-  const askBtn = `
-    <div style="margin-top:1.25rem;display:flex;gap:.5rem;flex-wrap:wrap;">
-      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">💬 Ask the wiki</a>
-      <a href="/wiki/${encodeURIComponent(user)}/_quiz?p=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">📝 Take a quiz</a>
-      <a href="/wiki/${encodeURIComponent(user)}/_compare?a=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">🔀 Compare with…</a>
+  const chips: string[] = [];
+  if (domain) chips.push(`<span class="domain-chip">${DOMAIN_EMOJI[domain] ?? ""} ${escapeHtml(domain)}</span>`);
+  for (const d of secondary) {
+    chips.push(`<span class="domain-chip">${DOMAIN_EMOJI[d] ?? ""} ${escapeHtml(d)}</span>`);
+  }
+  if (period) chips.push(`<a class="domain-chip" href="/wiki/${encodeURIComponent(user)}/periods/${encodeURIComponent(period)}">⏳ ${escapeHtml(period.replace(/-/g, " "))}</a>`);
+  if (place) chips.push(`<a class="domain-chip" href="/wiki/${encodeURIComponent(user)}/places/${encodeURIComponent(place)}">📍 ${escapeHtml(place.replace(/-/g, " "))}</a>`);
+  if (approxYear !== null) chips.push(`<span class="domain-chip">${formatYear(approxYear)}</span>`);
+  if (confidence !== null && confidence < 0.5) chips.push(`<span class="domain-chip" style="background:#FEF3C7;border-color:#FCD34D;color:#854D0E;">low confidence ${confidence.toFixed(2)}</span>`);
+
+  const ageBlock = hasAgeSummaries ? `
+    <div class="wiki-age" data-age-toggle>
+      <div class="wiki-age-tabs" role="tablist" aria-label="Reading level">
+        ${sum_5_7   ? `<button type="button" role="tab" data-band="5_7"   class="wiki-age-tab">Ages 5–7</button>` : ""}
+        ${sum_8_10  ? `<button type="button" role="tab" data-band="8_10"  class="wiki-age-tab is-active" aria-selected="true">Ages 8–10</button>` : ""}
+        ${sum_11_13 ? `<button type="button" role="tab" data-band="11_13" class="wiki-age-tab">Ages 11–13</button>` : ""}
+      </div>
+      ${sum_5_7   ? `<p class="wiki-age-text" data-band="5_7"  ${sum_8_10 || sum_11_13 ? `hidden` : ""}>${escapeHtml(sum_5_7)}</p>`   : ""}
+      ${sum_8_10  ? `<p class="wiki-age-text" data-band="8_10">${escapeHtml(sum_8_10)}</p>`                                       : ""}
+      ${sum_11_13 ? `<p class="wiki-age-text" data-band="11_13" hidden>${escapeHtml(sum_11_13)}</p>`                              : ""}
+    </div>` : (heroQuote ? `<p class="wiki-quote">${escapeHtml(heroQuote)}</p>` : "");
+
+  const actions = `
+    <div class="wiki-actions" role="toolbar" aria-label="Page actions">
+      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-amber btn-sm">💬 Ask the wiki</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_quiz?p=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">📝 Quiz</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_compare?a=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">🔀 Compare</a>
     </div>`;
 
   const inboundHtml = inbound.length
@@ -684,51 +922,162 @@ export function renderWikiPage(opts: {
     : "";
 
   const imageHtml = imageSrc
-    ? `<figure class="wiki-figure"><img src="${imageSrc}" alt="${escapeHtml(page.title)}" /></figure>`
+    ? `<figure class="wiki-hero-img"><img src="${imageSrc}" alt="${escapeHtml(page.title)}" /></figure>`
     : "";
 
   const body = `
-  <section class="wiki">
+  <section class="wiki ${domainClass}">
+    <div class="wiki-hero">
+      <div class="container">
+        <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
+          <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+          <span aria-hidden="true">›</span>
+          <span>${escapeHtml(page.kind.replace("_", " "))}</span>
+        </nav>
+        ${imageHtml}
+        <div class="wiki-hero-text">
+          ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
+          <h1>${escapeHtml(page.title)}</h1>
+          ${ageBlock}
+          ${isExhibit ? actions : ""}
+        </div>
+      </div>
+    </div>
     <div class="container wiki-container">
-      <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
-        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
-        <span aria-hidden="true">›</span>
-        <span>${escapeHtml(page.kind)}</span>
-        <span aria-hidden="true">›</span>
-        <span>${escapeHtml(page.title)}</span>
-      </nav>
-      ${imageHtml}
-      ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
       <article class="wiki-body">
         ${html}
       </article>
-      ${askBtn}
+      ${!isExhibit ? actions : ""}
       ${inboundHtml}
-      ${meta}
+      <details class="wiki-meta">
+        <summary>Page info <span class="muted">(for grown-ups)</span></summary>
+        <p class="muted">Last updated by AI · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} outbound link${page.outbound_links === 1 ? "" : "s"} · ${page.inbound_links} inbound link${page.inbound_links === 1 ? "" : "s"} · path <code>${escapeHtml(page.path)}</code></p>
+      </details>
     </div>
   </section>
   <style>
-    .wiki-container { max-width: 760px; }
-    .wiki-figure { margin: 0 0 1.5rem; }
-    .wiki-figure img { width:100%; max-height: 480px; object-fit: cover; border-radius: 1rem; }
-    .chips { display:flex; flex-wrap:wrap; gap:.4rem; margin: 0 0 1.25rem; }
-    .chip { display:inline-flex; align-items:center; gap:.25rem; padding:.18rem .55rem; border:1px solid var(--border,#e5e7eb); border-radius:999px; font-size:.8rem; background:var(--bg-elev,#fff); }
-    .chip a { color: inherit; text-decoration: none; }
-    .chip-domain { background: #ecfeff; border-color:#a5f3fc; }
-    .wiki-breadcrumb { font-size:.85rem; color:#64748b; margin: 0 0 1rem; display:flex; gap:.4rem; flex-wrap:wrap; }
+    .wiki-container { max-width: 760px; padding-top: 1.5rem; padding-bottom: 3rem; }
+    .wiki-hero {
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--d-active, var(--primary)) 10%, var(--bg)) 0%, var(--bg) 100%);
+      padding: 1.25rem 0 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .wiki-hero .container { max-width: 760px; }
+    .wiki-hero-img { margin: 0 0 1.5rem; }
+    .wiki-hero-img img { width:100%; max-height: 420px; object-fit: cover; border-radius: var(--radius-lg); box-shadow: var(--shadow-md); }
+    .wiki-hero-text h1 { font-family: 'Fraunces', serif; font-size: clamp(1.7rem, 3.6vw, 2.4rem); margin: .35rem 0 .75rem; color: var(--ink); }
+    .wiki-quote { font-size: 1.05rem; line-height: 1.55; color: var(--ink-soft); margin: .25rem 0 1rem; max-width: 60ch; }
+    .chips { display:flex; flex-wrap:wrap; gap:.4rem; margin: 0 0 .75rem; }
+    .wiki-breadcrumb { font-size:.82rem; color: var(--ink-muted); display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom: .75rem; }
     .wiki-breadcrumb a { color: inherit; }
-    .wiki-body h1 { font-family: 'Fraunces', serif; font-size: 2.4rem; margin: .25rem 0 1rem; }
-    .wiki-body h2 { margin-top: 2rem; }
-    .wiki-body blockquote { border-left: 3px solid var(--accent,#0ea5e9); margin: 1.25rem 0; padding: .25rem 1rem; color: #334155; font-style: italic; background: rgba(14,165,233,.05); border-radius: 0 .5rem .5rem 0; }
+    .wiki-actions { display:flex; gap:.5rem; flex-wrap:wrap; margin-top: 1.25rem; }
+    .wiki-age {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      margin-bottom: .25rem;
+      max-width: 60ch;
+      box-shadow: var(--shadow-sm);
+    }
+    .wiki-age-tabs { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .65rem; }
+    .wiki-age-tab {
+      padding: .25rem .65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--ink-muted);
+      font-size: .78rem;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .wiki-age-tab:hover { color: var(--ink); border-color: var(--border-strong); }
+    .wiki-age-tab.is-active {
+      background: var(--primary);
+      color: #FFFDF8;
+      border-color: var(--primary);
+    }
+    .wiki-age-text { font-size: 1.02rem; line-height: 1.55; color: var(--ink); margin: 0; }
+    .wiki-body { font-size: 1.02rem; line-height: 1.65; color: var(--ink-soft); }
+    .wiki-body h1 { display: none; } /* already in hero */
+    .wiki-body h2 {
+      margin: 2rem 0 .75rem;
+      font-family: 'Fraunces', serif;
+      font-size: 1.25rem;
+      color: var(--primary);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: .35rem;
+    }
+    .wiki-body h3 { margin-top: 1.5rem; font-size: 1.05rem; color: var(--ink); }
+    .wiki-body p { margin: 0 0 1rem; color: var(--ink-soft); }
+    .wiki-body blockquote { border-left: 3px solid var(--d-active, var(--accent)); margin: 1.25rem 0; padding: .25rem 1rem; color: var(--ink-soft); font-style: italic; background: var(--bg-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .wiki-body ul, .wiki-body ol { padding-left: 1.25rem; margin: .25rem 0 1rem; }
+    .wiki-body li { margin: .25rem 0; }
     .wiki-body ul li.task { list-style: none; margin-left: -1.25rem; }
-    .wiki-body a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
-    .wiki-inbound { margin-top: 2.5rem; padding: 1rem 1.25rem; border: 1px dashed var(--border,#e5e7eb); border-radius: .75rem; background: rgba(0,0,0,.02); }
-    .wiki-inbound h3 { margin: 0 0 .75rem; font-size: 1rem; }
+    .wiki-body a { color: var(--primary-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    .wiki-body a:hover { color: var(--primary); }
+    .wiki-inbound { margin-top: 2rem; padding: 1rem 1.25rem; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--bg-elev); }
+    .wiki-inbound h3 { margin: 0 0 .75rem; font-size: 1rem; color: var(--primary); }
     .wiki-inbound ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
-    .wiki-inbound li { font-size: .9rem; }
-    .wiki-inbound .rel-tag { display: inline-block; margin-left: .35rem; padding: 0 .4rem; border-radius: 4px; background: rgba(14,165,233,.12); font-size: .7rem; color: #0369a1; }
-  </style>`;
+    .wiki-inbound li { font-size: .92rem; }
+    .wiki-inbound .rel-tag { display: inline-block; margin-left: .35rem; padding: 0 .4rem; border-radius: 4px; background: var(--accent-soft); font-size: .7rem; color: var(--accent-ink); }
+    .wiki-meta { margin-top: 2rem; }
+    .wiki-meta summary { cursor: pointer; color: var(--ink-muted); font-size: .85rem; }
+    .wiki-meta summary:hover { color: var(--ink-soft); }
+    .wiki-meta p { margin-top: .5rem; font-size: .82rem; }
+  </style>
+  <script>
+  (function () {
+    var box = document.querySelector('[data-age-toggle]');
+    if (!box) return;
+    var tabs = box.querySelectorAll('.wiki-age-tab');
+    var texts = box.querySelectorAll('.wiki-age-text');
+    var stored = null;
+    try { stored = localStorage.getItem('museiq-age-band'); } catch (e) {}
+    if (stored) {
+      tabs.forEach(function (t) { t.classList.toggle('is-active', t.dataset.band === stored); t.setAttribute('aria-selected', t.dataset.band === stored ? 'true' : 'false'); });
+      texts.forEach(function (p) { p.hidden = p.dataset.band !== stored; });
+    }
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () {
+        var band = t.dataset.band;
+        tabs.forEach(function (x) { x.classList.toggle('is-active', x === t); x.setAttribute('aria-selected', x === t ? 'true' : 'false'); });
+        texts.forEach(function (p) { p.hidden = p.dataset.band !== band; });
+        try { localStorage.setItem('museiq-age-band', band); } catch (e) {}
+      });
+    });
+  })();
+  </script>`;
   return layout({ title: `${page.title} — MuseIQ Wiki`, body });
+}
+
+// Pull a leading "> ..." block from the body so we can hoist it into the hero.
+function extractLeadingQuote(md: string): { quote: string | null; body: string } {
+  // skip an optional H1 first
+  const lines = md.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  if (i < lines.length && /^# /.test(lines[i])) i++;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  if (i >= lines.length || !/^>\s?/.test(lines[i])) {
+    return { quote: null, body: md };
+  }
+  const buf: string[] = [];
+  const start = i;
+  while (i < lines.length && /^>\s?/.test(lines[i])) {
+    buf.push(lines[i].replace(/^>\s?/, ""));
+    i++;
+  }
+  const rest = lines.slice(0, start).concat(lines.slice(i)).join("\n");
+  return { quote: buf.join(" ").trim(), body: rest };
+}
+
+function stripLeadingHeading(md: string, title: string): string {
+  const re = new RegExp(`^\\s*#\\s+${title.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*\\n`, "i");
+  return md.replace(re, "");
 }
 
 export function renderWikiSyntheticPage(opts: {

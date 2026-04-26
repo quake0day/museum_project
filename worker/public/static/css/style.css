@@ -1,48 +1,96 @@
-/* ─────────────────────────── Design tokens ─────────────────────────── */
+/* ─────────────────────────── Design tokens ───────────────────────────
+   Warm Museum Palette: parchment background, museum navy primary,
+   discovery amber accent, with five domain colors used as the page-
+   level personality cue. Never neon, never candy. Curiosity ≠ cartoon.
+─────────────────────────────────────────────────────────────────────── */
 
 :root {
-  --bg: #faf7f2;
-  --bg-elev: #ffffff;
-  --bg-soft: #f3ede3;
-  --bg-hero: linear-gradient(180deg, #faf7f2 0%, #f2e9d8 100%);
-  --ink: #19130c;
-  --ink-soft: #4a4138;
-  --ink-muted: #8c8278;
-  --accent: #b8864b;
-  --accent-soft: #d7b483;
-  --accent-ink: #774e1e;
-  --border: #e8dfd0;
-  --border-strong: #d4c7b0;
-  --ring: rgba(184, 134, 75, 0.28);
-  --surface-hi: #ffffff;
-  --shadow-sm: 0 1px 2px rgba(30, 20, 10, 0.04), 0 2px 6px rgba(30, 20, 10, 0.04);
-  --shadow-md: 0 6px 18px rgba(30, 20, 10, 0.08), 0 2px 4px rgba(30, 20, 10, 0.04);
-  --shadow-lg: 0 24px 60px rgba(30, 20, 10, 0.14);
+  /* surfaces */
+  --bg:           #F7F1E5;          /* parchment */
+  --bg-elev:      #FFFDF8;          /* warm white card */
+  --bg-soft:      #EFE5D0;          /* soft surface for chips, blocks */
+  --bg-hero:      linear-gradient(180deg, #F7F1E5 0%, #ECE0C7 100%);
+
+  /* ink */
+  --ink:          #263238;          /* deep slate */
+  --ink-soft:     #3E4750;
+  --ink-muted:    #6B7280;
+
+  /* primary — museum navy */
+  --primary:      #1E3A5F;
+  --primary-soft: #DCE8F5;
+  --primary-ink:  #0E1F36;
+
+  /* accent — discovery amber */
+  --accent:       #D99A29;
+  --accent-soft:  #F8E8C7;
+  --accent-ink:   #6A430B;
+
+  /* domain colors (chip / hero tints) */
+  --d-history:    #B86B4B; --d-history-soft: #F3D9CC; --d-history-ink: #7A3F2A;
+  --d-art:        #1E3A5F; --d-art-soft:     #DCE8F5; --d-art-ink:     #0E1F36;
+  --d-science:    #7A9B76; --d-science-soft: #E4F0DF; --d-science-ink: #3E5F3B;
+  --d-tech:       #78A6C8; --d-tech-soft:    #DCE8F5; --d-tech-ink:    #2C5878;
+  --d-culture:    #D99A29; --d-culture-soft: #F8E8C7; --d-culture-ink: #6A430B;
+
+  /* borders & rings */
+  --border:        #E8DCC8;
+  --border-strong: #D4C0A0;
+  --ring:          rgba(30, 58, 95, 0.22);
+
+  /* legacy aliases (a few templates still reference these) */
+  --surface-hi: var(--bg-elev);
+
+  /* shadow — soft, navy-tinted */
+  --shadow-sm: 0 1px 2px rgba(30, 58, 95, 0.05), 0 2px 6px rgba(30, 58, 95, 0.06);
+  --shadow-md: 0 8px 24px rgba(30, 58, 95, 0.08), 0 2px 4px rgba(30, 58, 95, 0.05);
+  --shadow-lg: 0 24px 60px rgba(30, 58, 95, 0.14);
+
   --radius-sm: 10px;
-  --radius: 16px;
-  --radius-lg: 22px;
-  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --radius:    16px;
+  --radius-lg: 20px;
+  --ease:     cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 [data-theme="dark"] {
-  --bg: #0e0f13;
-  --bg-elev: #181a22;
-  --bg-soft: #222530;
-  --bg-hero: linear-gradient(180deg, #0e0f13 0%, #171925 100%);
-  --ink: #f2efe8;
-  --ink-soft: #c9c6be;
-  --ink-muted: #8e8f99;
-  --accent: #d4a574;
-  --accent-soft: #e5bf91;
-  --accent-ink: #f3d0a3;
-  --border: #2b2e3a;
-  --border-strong: #3a3d4b;
-  --ring: rgba(212, 165, 116, 0.34);
-  --surface-hi: #20222c;
+  --bg:           #0F1620;          /* deep navy-tinted */
+  --bg-elev:      #182233;
+  --bg-soft:      #1F2B3F;
+  --bg-hero:      linear-gradient(180deg, #0F1620 0%, #1A2638 100%);
+
+  --ink:          #F0E9D8;          /* warm parchment ink */
+  --ink-soft:     #C9C2B0;
+  --ink-muted:    #8E8F99;
+
+  --primary:      #78A6C8;          /* lifted navy → sky for contrast */
+  --primary-soft: rgba(120, 166, 200, 0.18);
+  --primary-ink:  #C8E0EE;
+
+  --accent:       #E9B763;
+  --accent-soft:  rgba(217, 154, 41, 0.18);
+  --accent-ink:   #F3D0A3;
+
+  --d-history:    #D08F6E; --d-history-soft: rgba(184, 107, 75, 0.20); --d-history-ink: #E8B499;
+  --d-art:        #97B7DA; --d-art-soft:     rgba(30, 58, 95, 0.30);   --d-art-ink:     #C8DAEE;
+  --d-science:    #9DBE99; --d-science-soft: rgba(122, 155, 118, 0.18); --d-science-ink: #C7DEC4;
+  --d-tech:       #9CC4DF; --d-tech-soft:    rgba(120, 166, 200, 0.18); --d-tech-ink:    #C7DEEC;
+  --d-culture:    #E9B763; --d-culture-soft: rgba(217, 154, 41, 0.18); --d-culture-ink: #F3D0A3;
+
+  --border:        #2C3850;
+  --border-strong: #3D4B66;
+  --ring:          rgba(120, 166, 200, 0.32);
+
+  --surface-hi: var(--bg-elev);
+
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+/* legacy aliases for old code paths */
+:root, [data-theme="dark"] {
+  /* the old code uses --accent/--accent-soft/--accent-ink already; kept */
 }
 
 /* ─────────────────────────── Base ─────────────────────────── */
@@ -149,14 +197,27 @@ img { max-width: 100%; height: auto; display: block; }
 .btn-sm { padding: 0.55rem 1rem; font-size: 0.88rem; }
 
 .btn-primary {
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--primary);
+  color: #FFFDF8;
   box-shadow: var(--shadow-sm);
 }
 .btn-primary:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
-  color: var(--bg);
+  background: var(--primary-ink);
+  color: #FFFDF8;
+}
+
+.btn-amber {
+  background: var(--accent);
+  color: #2B2111;
+  box-shadow: var(--shadow-sm);
+}
+.btn-amber:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  filter: brightness(1.04);
+  color: #2B2111;
 }
 
 .btn-ghost {
@@ -165,8 +226,33 @@ img { max-width: 100%; height: auto; display: block; }
   border-color: var(--border-strong);
 }
 .btn-ghost:hover {
-  border-color: var(--ink);
-  color: var(--ink);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* ── Domain skin utilities ──
+   Apply .domain-history etc. on a container; the class re-binds the
+   primary/accent variables locally so any descendant using them gets
+   tinted automatically (chips, hero gradients, buttons). */
+.domain-history { --d-active: var(--d-history); --d-active-soft: var(--d-history-soft); --d-active-ink: var(--d-history-ink); }
+.domain-art     { --d-active: var(--d-art);     --d-active-soft: var(--d-art-soft);     --d-active-ink: var(--d-art-ink); }
+.domain-science { --d-active: var(--d-science); --d-active-soft: var(--d-science-soft); --d-active-ink: var(--d-science-ink); }
+.domain-tech, .domain-technology { --d-active: var(--d-tech); --d-active-soft: var(--d-tech-soft); --d-active-ink: var(--d-tech-ink); }
+.domain-culture { --d-active: var(--d-culture); --d-active-soft: var(--d-culture-soft); --d-active-ink: var(--d-culture-ink); }
+
+.domain-chip {
+  --d-active: var(--accent);
+  --d-active-soft: var(--accent-soft);
+  --d-active-ink: var(--accent-ink);
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .22rem .65rem;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 500;
+  background: var(--d-active-soft);
+  color: var(--d-active-ink);
+  border: 1px solid color-mix(in srgb, var(--d-active) 30%, transparent);
+  letter-spacing: 0.01em;
 }
 
 /* ─────────────────────────── Header ─────────────────────────── */
@@ -204,8 +290,8 @@ img { max-width: 100%; height: auto; display: block; }
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--primary);
+  color: var(--accent);
 }
 .brand-mark svg { width: 20px; height: 20px; }
 
@@ -246,10 +332,24 @@ img { max-width: 100%; height: auto; display: block; }
   color: var(--ink);
 }
 .nav a.active {
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--primary);
+  color: #FFFDF8;
 }
-.nav a.active:hover { color: var(--bg); }
+.nav a.active:hover { color: #FFFDF8; }
+
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: transparent;
+  transition: background-color .15s, color .15s;
+}
+.nav-icon:hover { background: var(--bg-soft); color: var(--primary); }
+.nav-icon svg { width: 18px; height: 18px; }
 
 .theme-toggle {
   display: inline-flex;

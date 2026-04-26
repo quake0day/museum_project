@@ -23,6 +23,7 @@ import {
   renderWikiAsk,
   renderCompare,
   renderQuiz,
+  renderStudentHome,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -40,6 +41,7 @@ import { buildIndexPage, buildLogPage } from "./wiki/index_render";
 import { runLint } from "./wiki/lint";
 import { getMapPoints, getTimelinePoints } from "./wiki/views";
 import { evaluateQuests } from "./wiki/quests";
+import { buildDashboard } from "./wiki/dashboard";
 import { askWiki } from "./wiki/query";
 import { comparePages } from "./wiki/compare";
 import { generateQuiz } from "./wiki/quiz";
@@ -72,13 +74,27 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 app.get("/", async (c) => {
   try {
-    const stats = await getStats(c.env.DB);
-    return c.html(renderHome({ stats }));
+    const user = defaultUserId(c.env);
+    const data = await buildDashboard(c.env.DB, user);
+    return c.html(renderStudentHome({ user, data }));
   } catch (err) {
     console.error("home error", err);
     return c.html(renderError(errMsg(err)), 500);
   }
 });
+
+app.get("/about", async (c) => {
+  try {
+    const stats = await getStats(c.env.DB);
+    return c.html(renderHome({ stats }));
+  } catch (err) {
+    console.error("about error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+// /me alias to the student home
+app.get("/me", (c) => c.redirect("/", 302));
 
 app.get("/interactions/view", async (c) => {
   try {
