@@ -35,5 +35,12 @@ bucket_name = "museum-media"
 [observability]
 enabled = true
 
+# Cron trigger — every minute drain up to CRON_BATCH_SIZE pending/failed
+# interactions through the AI ingest pipeline. Scheduled handlers get
+# their own CPU budget independent of request handlers, so the backfill
+# completes without fighting user traffic.
+[triggers]
+crons = ["* * * * *"]
+
 [placement]
 mode = "smart"

@@ -332,10 +332,10 @@ img { max-width: 100%; height: auto; display: block; }
   color: var(--ink);
 }
 .nav a.active {
-  background: var(--primary);
-  color: #FFFDF8;
+  background: var(--primary-soft);
+  color: var(--primary);
 }
-.nav a.active:hover { color: #FFFDF8; }
+.nav a.active:hover { color: var(--primary); background: var(--primary-soft); }
 
 .nav-icon {
   display: inline-flex;

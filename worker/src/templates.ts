@@ -23,9 +23,9 @@ function layout(opts: { title: string; active?: string; body: string }): string 
   <link rel="stylesheet" href="/static/css/style.css" />
   <script>
     (function () {
+      // Always default to light. Only honor an explicit user-toggled choice.
       try {
-        var t = localStorage.getItem('museiq-theme');
-        if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        var t = localStorage.getItem('museiq-theme') || 'light';
         document.documentElement.setAttribute('data-theme', t);
       } catch (_) {}
     })();
@@ -878,33 +878,47 @@ export function renderWikiPage(opts: {
   const { quote: heroQuote, body: trimmedBody } = extractLeadingQuote(md);
   const html = renderMarkdown(stripLeadingHeading(trimmedBody, page.title));
 
+  // Hero chips — strict diet: only the primary domain, plus a single
+  // place/period summary line. No secondary-domain rainbow.
   const chips: string[] = [];
   if (domain) chips.push(`<span class="domain-chip">${DOMAIN_EMOJI[domain] ?? ""} ${escapeHtml(domain)}</span>`);
-  for (const d of secondary) {
-    chips.push(`<span class="domain-chip">${DOMAIN_EMOJI[d] ?? ""} ${escapeHtml(d)}</span>`);
+  // Combine period + year + place into a single human-readable subtitle
+  const subtitleParts: string[] = [];
+  if (approxYear !== null) subtitleParts.push(formatYear(approxYear));
+  else if (period) subtitleParts.push(period.replace(/-/g, " "));
+  if (place) subtitleParts.push(place.replace(/-/g, " "));
+  const subtitle = subtitleParts.length
+    ? `<p class="wiki-subtitle">${escapeHtml(subtitleParts.join(" · "))}</p>`
+    : "";
+  if (confidence !== null && confidence < 0.5) {
+    chips.push(`<span class="domain-chip" style="background:#FEF3C7;border-color:#FCD34D;color:#854D0E;">low confidence ${confidence.toFixed(2)}</span>`);
   }
-  if (period) chips.push(`<a class="domain-chip" href="/wiki/${encodeURIComponent(user)}/periods/${encodeURIComponent(period)}">⏳ ${escapeHtml(period.replace(/-/g, " "))}</a>`);
-  if (place) chips.push(`<a class="domain-chip" href="/wiki/${encodeURIComponent(user)}/places/${encodeURIComponent(place)}">📍 ${escapeHtml(place.replace(/-/g, " "))}</a>`);
-  if (approxYear !== null) chips.push(`<span class="domain-chip">${formatYear(approxYear)}</span>`);
-  if (confidence !== null && confidence < 0.5) chips.push(`<span class="domain-chip" style="background:#FEF3C7;border-color:#FCD34D;color:#854D0E;">low confidence ${confidence.toFixed(2)}</span>`);
 
+  // Reading-level switcher: single thin row, no card. The selected band's
+  // summary becomes the hero blockquote.
+  const bands: Array<{ key: "5_7" | "8_10" | "11_13"; label: string; text: string | null }> = [
+    { key: "5_7",   label: "5–7",   text: sum_5_7 },
+    { key: "8_10",  label: "8–10",  text: sum_8_10 },
+    { key: "11_13", label: "11–13", text: sum_11_13 },
+  ];
+  const available = bands.filter((b) => b.text);
+  const defaultBand = available.find((b) => b.key === "8_10")?.key ?? available[0]?.key;
   const ageBlock = hasAgeSummaries ? `
-    <div class="wiki-age" data-age-toggle>
-      <div class="wiki-age-tabs" role="tablist" aria-label="Reading level">
-        ${sum_5_7   ? `<button type="button" role="tab" data-band="5_7"   class="wiki-age-tab">Ages 5–7</button>` : ""}
-        ${sum_8_10  ? `<button type="button" role="tab" data-band="8_10"  class="wiki-age-tab is-active" aria-selected="true">Ages 8–10</button>` : ""}
-        ${sum_11_13 ? `<button type="button" role="tab" data-band="11_13" class="wiki-age-tab">Ages 11–13</button>` : ""}
-      </div>
-      ${sum_5_7   ? `<p class="wiki-age-text" data-band="5_7"  ${sum_8_10 || sum_11_13 ? `hidden` : ""}>${escapeHtml(sum_5_7)}</p>`   : ""}
-      ${sum_8_10  ? `<p class="wiki-age-text" data-band="8_10">${escapeHtml(sum_8_10)}</p>`                                       : ""}
-      ${sum_11_13 ? `<p class="wiki-age-text" data-band="11_13" hidden>${escapeHtml(sum_11_13)}</p>`                              : ""}
-    </div>` : (heroQuote ? `<p class="wiki-quote">${escapeHtml(heroQuote)}</p>` : "");
+    <p class="wiki-summary" data-summary-host>${escapeHtml(available.find((b) => b.key === defaultBand)?.text ?? "")}</p>
+    <div class="wiki-age-row" data-age-toggle>
+      <span class="wiki-age-label">Reading level</span>
+      ${available.map((b) => `<button type="button" data-band="${b.key}" class="wiki-age-tab${b.key === defaultBand ? " is-active" : ""}" aria-selected="${b.key === defaultBand}">${b.label}</button>`).join("")}
+      ${available.map((b) => `<template data-band-text="${b.key}">${escapeHtml(b.text ?? "")}</template>`).join("")}
+    </div>` : (heroQuote ? `<p class="wiki-summary">${escapeHtml(heroQuote)}</p>` : "");
 
-  const actions = `
+  const actions = isExhibit ? `
     <div class="wiki-actions" role="toolbar" aria-label="Page actions">
-      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-amber btn-sm">💬 Ask the wiki</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-primary">💬 Ask the wiki</a>
       <a href="/wiki/${encodeURIComponent(user)}/_quiz?p=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">📝 Quiz</a>
       <a href="/wiki/${encodeURIComponent(user)}/_compare?a=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">🔀 Compare</a>
+    </div>` : `
+    <div class="wiki-actions" role="toolbar" aria-label="Page actions">
+      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">💬 Ask the wiki</a>
     </div>`;
 
   const inboundHtml = inbound.length
@@ -928,18 +942,21 @@ export function renderWikiPage(opts: {
   const body = `
   <section class="wiki ${domainClass}">
     <div class="wiki-hero">
-      <div class="container">
+      <div class="container wiki-container">
         <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
           <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
           <span aria-hidden="true">›</span>
           <span>${escapeHtml(page.kind.replace("_", " "))}</span>
         </nav>
-        ${imageHtml}
-        <div class="wiki-hero-text">
-          ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
-          <h1>${escapeHtml(page.title)}</h1>
-          ${ageBlock}
-          ${isExhibit ? actions : ""}
+        <div class="wiki-hero-grid">
+          ${imageHtml}
+          <div class="wiki-hero-text">
+            ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
+            <h1>${escapeHtml(page.title)}</h1>
+            ${subtitle}
+            ${ageBlock}
+            ${actions}
+          </div>
         </div>
       </div>
     </div>
@@ -947,7 +964,6 @@ export function renderWikiPage(opts: {
       <article class="wiki-body">
         ${html}
       </article>
-      ${!isExhibit ? actions : ""}
       ${inboundHtml}
       <details class="wiki-meta">
         <summary>Page info <span class="muted">(for grown-ups)</span></summary>
@@ -956,98 +972,178 @@ export function renderWikiPage(opts: {
     </div>
   </section>
   <style>
-    .wiki-container { max-width: 760px; padding-top: 1.5rem; padding-bottom: 3rem; }
+    .wiki-container { max-width: 880px; padding-top: 1.5rem; padding-bottom: 3rem; }
     .wiki-hero {
       background:
-        linear-gradient(180deg, color-mix(in srgb, var(--d-active, var(--primary)) 10%, var(--bg)) 0%, var(--bg) 100%);
+        linear-gradient(180deg, color-mix(in srgb, var(--d-active, var(--primary)) 8%, var(--bg)) 0%, var(--bg) 100%);
       padding: 1.25rem 0 2rem;
       border-bottom: 1px solid var(--border);
     }
-    .wiki-hero .container { max-width: 760px; }
-    .wiki-hero-img { margin: 0 0 1.5rem; }
-    .wiki-hero-img img { width:100%; max-height: 420px; object-fit: cover; border-radius: var(--radius-lg); box-shadow: var(--shadow-md); }
-    .wiki-hero-text h1 { font-family: 'Fraunces', serif; font-size: clamp(1.7rem, 3.6vw, 2.4rem); margin: .35rem 0 .75rem; color: var(--ink); }
-    .wiki-quote { font-size: 1.05rem; line-height: 1.55; color: var(--ink-soft); margin: .25rem 0 1rem; max-width: 60ch; }
-    .chips { display:flex; flex-wrap:wrap; gap:.4rem; margin: 0 0 .75rem; }
-    .wiki-breadcrumb { font-size:.82rem; color: var(--ink-muted); display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom: .75rem; }
+    .wiki-hero .wiki-container { padding-top: .25rem; padding-bottom: .25rem; }
+    .wiki-breadcrumb { font-size:.82rem; color: var(--ink-muted); display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom: 1rem; }
     .wiki-breadcrumb a { color: inherit; }
-    .wiki-actions { display:flex; gap:.5rem; flex-wrap:wrap; margin-top: 1.25rem; }
-    .wiki-age {
+    .wiki-hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 360px) 1fr;
+      gap: 2rem;
+      align-items: start;
+    }
+    .wiki-hero-img { margin: 0; }
+    .wiki-hero-img img {
+      width: 100%;
+      aspect-ratio: 4/3;
+      object-fit: cover;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+    }
+    .wiki-hero-text h1 {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(1.6rem, 3vw, 2.1rem);
+      margin: .25rem 0 .35rem;
+      color: var(--ink);
+      letter-spacing: -.01em;
+    }
+    .wiki-subtitle {
+      font-size: .92rem;
+      color: var(--ink-muted);
+      margin: 0 0 1rem;
+      letter-spacing: 0.02em;
+      text-transform: capitalize;
+    }
+    .chips { display:flex; flex-wrap:wrap; gap:.4rem; margin: 0 0 .35rem; }
+    .wiki-summary {
+      font-size: 1.05rem;
+      line-height: 1.6;
+      color: var(--ink);
+      margin: 0 0 1rem;
+      max-width: 60ch;
+      font-weight: 450;
+    }
+    .wiki-age-row {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      flex-wrap: wrap;
+      margin: 0 0 1.25rem;
+      padding: .25rem .35rem .25rem .65rem;
       background: var(--bg-elev);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1rem 1.25rem;
-      margin-bottom: .25rem;
-      max-width: 60ch;
-      box-shadow: var(--shadow-sm);
-    }
-    .wiki-age-tabs { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .65rem; }
-    .wiki-age-tab {
-      padding: .25rem .65rem;
       border-radius: 999px;
-      border: 1px solid var(--border);
-      background: var(--bg);
-      color: var(--ink-muted);
       font-size: .78rem;
+    }
+    .wiki-age-label { color: var(--ink-muted); font-weight: 500; padding-right: .15rem; }
+    .wiki-age-tab {
+      padding: .2rem .6rem;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      color: var(--ink-muted);
+      font-size: .8rem;
       font-weight: 500;
       cursor: pointer;
       font-family: inherit;
-      transition: background .15s, color .15s, border-color .15s;
+      transition: background .15s, color .15s;
     }
-    .wiki-age-tab:hover { color: var(--ink); border-color: var(--border-strong); }
+    .wiki-age-tab:hover { color: var(--ink); }
     .wiki-age-tab.is-active {
       background: var(--primary);
       color: #FFFDF8;
-      border-color: var(--primary);
     }
-    .wiki-age-text { font-size: 1.02rem; line-height: 1.55; color: var(--ink); margin: 0; }
-    .wiki-body { font-size: 1.02rem; line-height: 1.65; color: var(--ink-soft); }
+    .wiki-actions { display:flex; gap:.5rem; flex-wrap:wrap; margin-top: .25rem; }
+    .wiki-actions .btn-primary {
+      padding: .65rem 1.15rem;
+      font-size: .95rem;
+    }
+
+    .wiki-body { font-size: 1.02rem; line-height: 1.7; color: var(--ink); }
     .wiki-body h1 { display: none; } /* already in hero */
     .wiki-body h2 {
-      margin: 2rem 0 .75rem;
+      margin: 2.25rem 0 .75rem;
       font-family: 'Fraunces', serif;
-      font-size: 1.25rem;
+      font-size: 1.3rem;
       color: var(--primary);
-      border-bottom: 1px solid var(--border);
-      padding-bottom: .35rem;
+      letter-spacing: -.005em;
+    }
+    .wiki-body h2::before {
+      content: "";
+      display: inline-block;
+      width: 1.4rem;
+      height: 2px;
+      background: var(--d-active, var(--accent));
+      margin-right: .65rem;
+      vertical-align: middle;
+      border-radius: 2px;
     }
     .wiki-body h3 { margin-top: 1.5rem; font-size: 1.05rem; color: var(--ink); }
-    .wiki-body p { margin: 0 0 1rem; color: var(--ink-soft); }
-    .wiki-body blockquote { border-left: 3px solid var(--d-active, var(--accent)); margin: 1.25rem 0; padding: .25rem 1rem; color: var(--ink-soft); font-style: italic; background: var(--bg-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-    .wiki-body ul, .wiki-body ol { padding-left: 1.25rem; margin: .25rem 0 1rem; }
-    .wiki-body li { margin: .25rem 0; }
+    .wiki-body p { margin: 0 0 1rem; color: var(--ink); max-width: 70ch; }
+    .wiki-body blockquote {
+      border-left: 3px solid var(--d-active, var(--accent));
+      margin: 1.25rem 0;
+      padding: .35rem 1rem;
+      color: var(--ink);
+      font-style: italic;
+      background: color-mix(in srgb, var(--d-active, var(--accent)) 7%, var(--bg-elev));
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+    .wiki-body ul, .wiki-body ol { padding-left: 1.25rem; margin: .25rem 0 1rem; max-width: 70ch; }
+    .wiki-body li { margin: .35rem 0; color: var(--ink); }
     .wiki-body ul li.task { list-style: none; margin-left: -1.25rem; }
-    .wiki-body a { color: var(--primary-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
-    .wiki-body a:hover { color: var(--primary); }
-    .wiki-inbound { margin-top: 2rem; padding: 1rem 1.25rem; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--bg-elev); }
+    .wiki-body a {
+      color: var(--primary-ink);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent);
+    }
+    .wiki-body a:hover { color: var(--primary); text-decoration-color: var(--primary); }
+
+    .wiki-inbound {
+      margin-top: 2rem;
+      padding: 1rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+    }
     .wiki-inbound h3 { margin: 0 0 .75rem; font-size: 1rem; color: var(--primary); }
     .wiki-inbound ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
     .wiki-inbound li { font-size: .92rem; }
     .wiki-inbound .rel-tag { display: inline-block; margin-left: .35rem; padding: 0 .4rem; border-radius: 4px; background: var(--accent-soft); font-size: .7rem; color: var(--accent-ink); }
-    .wiki-meta { margin-top: 2rem; }
+    .wiki-meta { margin-top: 2.5rem; }
     .wiki-meta summary { cursor: pointer; color: var(--ink-muted); font-size: .85rem; }
     .wiki-meta summary:hover { color: var(--ink-soft); }
     .wiki-meta p { margin-top: .5rem; font-size: .82rem; }
+
+    @media (max-width: 760px) {
+      .wiki-hero-grid { grid-template-columns: 1fr; gap: 1rem; }
+      .wiki-hero-img img { aspect-ratio: 16/10; }
+      .wiki-hero-text h1 { font-size: 1.55rem; }
+    }
   </style>
   <script>
   (function () {
     var box = document.querySelector('[data-age-toggle]');
     if (!box) return;
+    var host = document.querySelector('[data-summary-host]');
     var tabs = box.querySelectorAll('.wiki-age-tab');
-    var texts = box.querySelectorAll('.wiki-age-text');
+    var texts = {};
+    box.querySelectorAll('template[data-band-text]').forEach(function (t) {
+      texts[t.dataset.bandText] = t.textContent || "";
+    });
     var stored = null;
     try { stored = localStorage.getItem('museiq-age-band'); } catch (e) {}
-    if (stored) {
-      tabs.forEach(function (t) { t.classList.toggle('is-active', t.dataset.band === stored); t.setAttribute('aria-selected', t.dataset.band === stored ? 'true' : 'false'); });
-      texts.forEach(function (p) { p.hidden = p.dataset.band !== stored; });
-    }
-    tabs.forEach(function (t) {
-      t.addEventListener('click', function () {
-        var band = t.dataset.band;
-        tabs.forEach(function (x) { x.classList.toggle('is-active', x === t); x.setAttribute('aria-selected', x === t ? 'true' : 'false'); });
-        texts.forEach(function (p) { p.hidden = p.dataset.band !== band; });
-        try { localStorage.setItem('museiq-age-band', band); } catch (e) {}
+    function setBand(band) {
+      if (!texts[band]) return;
+      tabs.forEach(function (t) {
+        var on = t.dataset.band === band;
+        t.classList.toggle('is-active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
       });
+      if (host) host.textContent = texts[band];
+      try { localStorage.setItem('museiq-age-band', band); } catch (e) {}
+    }
+    if (stored && texts[stored]) setBand(stored);
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () { setBand(t.dataset.band); });
     });
   })();
   </script>`;

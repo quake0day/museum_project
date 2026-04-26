@@ -671,7 +671,42 @@ app.onError((err, c) => {
   return c.html(renderError(errMsg(err)), 500);
 });
 
-export default app;
+// ───────────────────────────── Cron handler ─────────────────────────────
+// Drains a small batch of pending/failed ingests on each tick. Configured
+// in wrangler.toml [triggers]. Each tick runs sequentially; the platform
+// gives scheduled handlers their own CPU budget separate from request
+// handlers, so the long backfill no longer competes with user traffic.
+
+const CRON_BATCH_SIZE = 8;
+
+async function scheduled(_event: ScheduledEvent, env: Bindings, ctx: ExecutionContext): Promise<void> {
+  if (!env.DEEPSEEK_API_KEY) {
+    console.log("cron: DEEPSEEK_API_KEY not set, skipping");
+    return;
+  }
+  try {
+    const res = await env.DB
+      .prepare(
+        "SELECT id FROM interactions WHERE analysis_status IN ('pending','failed') ORDER BY date DESC LIMIT ?1",
+      )
+      .bind(CRON_BATCH_SIZE)
+      .all<{ id: string }>();
+    const ids = (res.results ?? []).map((r) => r.id);
+    if (!ids.length) {
+      console.log("cron: nothing to ingest");
+      return;
+    }
+    console.log("cron: draining", ids.length, "items");
+    ctx.waitUntil(ingestBatch(env, ids));
+  } catch (e) {
+    console.error("cron error", errMsg(e));
+  }
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled,
+};
 
 // ───────────────────────────── helpers ─────────────────────────────
 
