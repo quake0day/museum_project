@@ -85,6 +85,11 @@ approx_year:   -1000                   # negative = BCE, integer year. Single po
 origin_lat:    35.0
 origin_lon:    113.0
 
+# IMPORTANT: when you set `period`, ALSO set approx_year (the mid-point of
+# the period). When you set `place`, ALSO set origin_lat / origin_lon
+# (a representative coordinate for the place — country centroid is fine).
+# These two pairs are how the timeline and map find your exhibit.
+
 # age-graded summaries — short, calibrated to reading level
 summary_5_7:   "Long ago people made fancy bowls out of metal for special meals."
 summary_8_10:  "This is a bronze cup used by ancient Chinese kings during ceremonies for their ancestors."
@@ -155,6 +160,28 @@ relates to — concepts, periods, places, themes, etc.
 A markdown checklist (`- [ ]`) of 2–4 specific things the child could look
 for next time. Be concrete: "A bronze object from another civilization"
 beats "Something about ancient China."
+
+### Entity-page frontmatter must-haves
+
+When emitting these entity kinds in `entity_pages`, include the indicated
+fields so the timeline and map work without re-asking the LLM:
+
+```yaml
+# kind: period
+year_start: -1600        # earliest plausible year (BCE negative)
+year_end:   -256
+year_mid:   -1000        # used as the timeline pin if exhibit lacks approx_year
+
+# kind: place
+lat: 35.0                # representative latitude
+lon: 113.0               # representative longitude
+
+# kind: civilization
+year_start: -1600
+year_end:   -256
+lat: 35.0
+lon: 113.0
+```
 
 ## Body structure (entity pages — concept / place / period / etc.)
 

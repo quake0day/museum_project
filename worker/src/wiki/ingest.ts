@@ -88,13 +88,36 @@ export async function ingestExhibit(
     return { status: "failed", pageWritten: false, error: msg };
   }
 
-  // 2. derive denorm fields from frontmatter
+  // 2. derive denorm fields from frontmatter (with fallback through
+  //    period/place entity pages so timeline/map still get coordinates
+  //    when the LLM only set period/place slugs)
   const fm = envelope.exhibit_page.frontmatter || {};
   const primaryDomain = stringOr(fm.domain, envelope.classify.primary_domain);
   const objectType = stringOr(fm.object_type, envelope.classify.object_type ?? null);
-  const approxYear = numberOrNull(fm.approx_year);
-  const lat = numberOrNull(fm.origin_lat);
-  const lon = numberOrNull(fm.origin_lon);
+  let approxYear = numberOrNull(fm.approx_year);
+  let lat = numberOrNull(fm.origin_lat);
+  let lon = numberOrNull(fm.origin_lon);
+
+  if (approxYear === null && typeof fm.period === "string" && fm.period) {
+    const p = await getWikiPage(db, input.userId, `periods/${fm.period}`);
+    if (p?.frontmatter_json) {
+      try {
+        const pfm = JSON.parse(p.frontmatter_json);
+        approxYear = numberOrNull(pfm.year_mid)
+          ?? midpoint(numberOrNull(pfm.year_start), numberOrNull(pfm.year_end));
+      } catch { /* ignore */ }
+    }
+  }
+  if ((lat === null || lon === null) && typeof fm.place === "string" && fm.place) {
+    const p = await getWikiPage(db, input.userId, `places/${fm.place}`);
+    if (p?.frontmatter_json) {
+      try {
+        const pfm = JSON.parse(p.frontmatter_json);
+        if (lat === null) lat = numberOrNull(pfm.lat);
+        if (lon === null) lon = numberOrNull(pfm.lon);
+      } catch { /* ignore */ }
+    }
+  }
 
   // 3. write the wiki page
   const pagePath = `exhibits/${input.exhibitId}`;
@@ -402,6 +425,13 @@ function extractChildSummary(body: string): string | null {
 function stringOr(v: unknown, fallback: string | null): string | null {
   if (typeof v === "string" && v.trim()) return v.trim();
   return fallback;
+}
+
+function midpoint(a: number | null, b: number | null): number | null {
+  if (a === null && b === null) return null;
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.round((a + b) / 2);
 }
 
 function numberOrNull(v: unknown): number | null {

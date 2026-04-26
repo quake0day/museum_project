@@ -1,6 +1,6 @@
 import schema from "../wiki/SCHEMA.md";
 
-const ANALYSIS_VERSION = 2;
+const ANALYSIS_VERSION = 3;
 
 export type IngestPromptInput = {
   exhibitId: string;
