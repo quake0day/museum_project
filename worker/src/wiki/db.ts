@@ -194,6 +194,54 @@ export async function recentWikiLog(
   return res.results ?? [];
 }
 
+export type WikiSearchHit = {
+  path: string;
+  title: string;
+  kind: string;
+  snippet: string;
+  rank: number;
+};
+
+export async function searchWiki(
+  db: D1Database,
+  userId: string,
+  query: string,
+  limit = 30,
+): Promise<WikiSearchHit[]> {
+  // Sanitize query for FTS5 — strip everything that isn't a word, hyphen, or space.
+  const cleaned = query
+    .replace(/[^\p{L}\p{N}\s\-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return [];
+  // Use prefix matching on each token: "bronze age" → "bronze* age*"
+  const ftsQuery = cleaned
+    .split(" ")
+    .filter((t) => t.length >= 2)
+    .map((t) => `${t}*`)
+    .join(" ");
+  if (!ftsQuery) return [];
+  const res = await db
+    .prepare(
+      `SELECT
+         wiki_pages.path AS path,
+         wiki_pages.title AS title,
+         wiki_pages.kind AS kind,
+         snippet(wiki_pages_fts, 1, '<mark>', '</mark>', '…', 12) AS snippet,
+         bm25(wiki_pages_fts) AS rank
+       FROM wiki_pages_fts
+       JOIN wiki_pages
+         ON wiki_pages_fts.rowid = wiki_pages.rowid
+       WHERE wiki_pages_fts MATCH ?2
+         AND wiki_pages.user_id = ?1
+       ORDER BY rank
+       LIMIT ?3`,
+    )
+    .bind(userId, ftsQuery, limit)
+    .all<WikiSearchHit>();
+  return res.results ?? [];
+}
+
 export type WikiStats = {
   pages: number;
   by_kind: Record<string, number>;

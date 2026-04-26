@@ -1,6 +1,6 @@
 import type { InteractionRow, Stats } from "./db";
 import { escapeHtml, formatDate } from "./util";
-import type { WikiPageRow } from "./wiki/db";
+import type { WikiPageRow, WikiSearchHit } from "./wiki/db";
 import { renderMarkdown } from "./wiki/render";
 
 function layout(opts: { title: string; active?: string; body: string }): string {
@@ -474,6 +474,9 @@ export function renderAdminList(data: {
             ${query ? `<a class="search-clear" href="/admin/photos" aria-label="Clear search">×</a>` : ""}
             <button type="submit" class="btn btn-primary btn-sm">Search</button>
           </form>
+          <a class="btn btn-ghost btn-sm" href="/admin/lint/default" title="Wiki health check">Lint</a>
+          <a class="btn btn-ghost btn-sm" href="/wiki/default/index" title="Browse the wiki">Wiki</a>
+          <a class="btn btn-ghost btn-sm" href="/wiki/default/_search" title="Search the wiki">Search</a>
           <form method="POST" action="/admin/ingest-all-pending" onsubmit="return confirm('Run AI ingest on all pending/failed interactions? Uses DeepSeek quota.');">
             <button type="submit" class="btn btn-ghost btn-sm" title="Drain pending+failed into the ingest queue">Ingest all pending</button>
           </form>
@@ -715,6 +718,146 @@ export function renderWikiPage(opts: {
     .wiki-inbound .rel-tag { display: inline-block; margin-left: .35rem; padding: 0 .4rem; border-radius: 4px; background: rgba(14,165,233,.12); font-size: .7rem; color: #0369a1; }
   </style>`;
   return layout({ title: `${page.title} — MuseIQ Wiki`, body });
+}
+
+export function renderWikiSyntheticPage(opts: {
+  user: string;
+  path: string;
+  kind: "index" | "log";
+  title: string;
+  body: string;
+}): string {
+  const { user, kind, title, body } = opts;
+  const html = renderMarkdown(body);
+  const pageBody = `
+  <section class="wiki">
+    <div class="container wiki-container">
+      <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
+        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <span aria-hidden="true">›</span>
+        <span>${escapeHtml(kind)}</span>
+      </nav>
+      <article class="wiki-body">${html}</article>
+      <p class="muted" style="margin-top:2rem;font-size:.85rem;">
+        ${kind === "index" ? "Auto-generated index" : "Auto-generated log"} · live view
+      </p>
+    </div>
+  </section>
+  <style>
+    .wiki-container { max-width: 760px; }
+    .wiki-breadcrumb { font-size:.85rem; color:#64748b; margin: 0 0 1rem; display:flex; gap:.4rem; }
+    .wiki-body h1 { font-family: 'Fraunces', serif; font-size: 2.4rem; margin: .25rem 0 1rem; }
+    .wiki-body h2 { margin-top: 2rem; }
+    .wiki-body blockquote { border-left: 3px solid var(--accent,#0ea5e9); margin: 1.25rem 0; padding: .25rem 1rem; color: #334155; font-style: italic; background: rgba(14,165,233,.05); border-radius: 0 .5rem .5rem 0; }
+    .wiki-body ul li { margin: 0; }
+    .wiki-body a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  </style>`;
+  return layout({ title: `${title} — MuseIQ`, body: pageBody });
+}
+
+export function renderWikiSearch(opts: {
+  user: string;
+  query: string;
+  hits: WikiSearchHit[];
+}): string {
+  const { user, query, hits } = opts;
+  const results = hits.length
+    ? `<ul class="search-results">${hits
+        .map((h) => {
+          const href = `/wiki/${encodeURIComponent(user)}/${h.path.split("/").map(encodeURIComponent).join("/")}`;
+          // snippet contains <mark>…</mark> from FTS5; we trust those tags only.
+          return `<li>
+            <a href="${href}"><strong>${escapeHtml(h.title)}</strong></a>
+            <span class="muted">· ${escapeHtml(h.kind)} · ${escapeHtml(h.path)}</span>
+            <p class="snippet">${sanitizeSnippet(h.snippet)}</p>
+          </li>`;
+        })
+        .join("")}</ul>`
+    : `<p class="muted">${query ? `No matches for "${escapeHtml(query)}".` : "Type a query above to search the wiki."}</p>`;
+
+  const body = `
+  <section class="wiki">
+    <div class="container wiki-container">
+      <nav class="wiki-breadcrumb">
+        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <span aria-hidden="true">›</span>
+        <span>search</span>
+      </nav>
+      <h1>Search the wiki</h1>
+      <form method="get" action="/wiki/${encodeURIComponent(user)}/_search" role="search" class="search-form">
+        <input type="search" name="q" value="${escapeHtml(query)}" placeholder="bronze, ritual, perspective…" autofocus />
+        <button class="btn btn-primary btn-sm" type="submit">Search</button>
+      </form>
+      <p class="muted" style="font-size:.85rem;">${hits.length} result${hits.length === 1 ? "" : "s"}.</p>
+      ${results}
+    </div>
+  </section>
+  <style>
+    .wiki-container { max-width: 760px; }
+    .search-form { display:flex; gap:.5rem; margin: 1rem 0; }
+    .search-form input { flex:1; padding: .5rem .75rem; border:1px solid var(--border,#e5e7eb); border-radius:.5rem; font-size:1rem; }
+    .search-results { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .75rem; }
+    .search-results li { padding: .85rem 1rem; border:1px solid var(--border,#e5e7eb); border-radius:.6rem; background:var(--bg-elev,#fff); }
+    .search-results .snippet { margin: .35rem 0 0; font-size: .9rem; color:#475569; line-height:1.4; }
+    .search-results mark { background: #fef08a; color:inherit; padding: 0 1px; }
+  </style>`;
+  return layout({ title: query ? `"${query}" — Wiki search` : "Wiki search — MuseIQ", body });
+}
+
+function sanitizeSnippet(s: string): string {
+  // FTS5 snippet emits text with <mark>…</mark>. Escape everything else.
+  const parts = s.split(/(<\/?mark>)/g);
+  return parts.map((p) => (p === "<mark>" || p === "</mark>") ? p : escapeHtml(p)).join("");
+}
+
+export function renderLintReport(opts: {
+  user: string;
+  findings: Array<{ severity: "info" | "warn" | "error"; category: string; path: string | null; message: string }>;
+}): string {
+  const { user, findings } = opts;
+  const counts: Record<string, number> = {};
+  for (const f of findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
+  const colors: Record<string, string> = {
+    error: "background:#fee2e2;color:#991b1b;border-color:#fca5a5;",
+    warn: "background:#fef3c7;color:#854d0e;border-color:#fcd34d;",
+    info: "background:#dbeafe;color:#1e3a8a;border-color:#93c5fd;",
+  };
+  const items = findings.length
+    ? findings.map((f) => {
+        const href = f.path
+          ? `/wiki/${encodeURIComponent(user)}/${f.path.split("/").map(encodeURIComponent).join("/")}`
+          : null;
+        return `<li>
+          <span class="lint-sev" style="${colors[f.severity]}">${f.severity}</span>
+          <span class="lint-cat">${escapeHtml(f.category)}</span>
+          ${href ? `<a href="${href}" class="lint-path">${escapeHtml(f.path ?? "")}</a>` : `<span class="lint-path muted">(no path)</span>`}
+          <span class="lint-msg">${escapeHtml(f.message)}</span>
+        </li>`;
+      }).join("")
+    : `<li class="muted">No findings — wiki looks healthy.</li>`;
+  const body = `
+  <section class="list">
+    <div class="container" style="max-width: 900px;">
+      <header class="list-header">
+        <div class="list-title">
+          <p class="eyebrow">Admin · Lint</p>
+          <h1>Wiki health for ${escapeHtml(user)}</h1>
+          <p class="muted">${findings.length} finding${findings.length === 1 ? "" : "s"}: ${counts.error ?? 0} error · ${counts.warn ?? 0} warn · ${counts.info ?? 0} info</p>
+        </div>
+        <div><a class="btn btn-ghost btn-sm" href="/admin/photos">← Back to admin</a></div>
+      </header>
+      <ul class="lint-list">${items}</ul>
+    </div>
+  </section>
+  <style>
+    .lint-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
+    .lint-list li { display: grid; grid-template-columns: 60px 110px 1fr; gap: .6rem; align-items: baseline; padding: .5rem .75rem; border:1px solid var(--border,#e5e7eb); border-radius:.5rem; background:var(--bg-elev,#fff); font-size:.9rem; }
+    .lint-sev { padding: .05rem .4rem; border-radius:999px; font-size:.7rem; font-weight:600; text-align:center; border:1px solid; }
+    .lint-cat { font-family: ui-monospace, monospace; color:#475569; font-size:.8rem; }
+    .lint-path { font-family: ui-monospace, monospace; font-size:.8rem; }
+    .lint-msg { grid-column: 1 / -1; padding-left: 0; color:#334155; }
+  </style>`;
+  return layout({ title: "Wiki lint — MuseIQ", body });
 }
 
 export function renderWikiNotFound(opts: { user: string; path: string }): string {

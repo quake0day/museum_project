@@ -13,7 +13,10 @@ import {
   renderHome,
   renderList,
   renderWikiPage,
+  renderWikiSyntheticPage,
   renderWikiNotFound,
+  renderWikiSearch,
+  renderLintReport,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -26,7 +29,9 @@ import {
 } from "./util";
 import { getAiProvider } from "./ai";
 import { ingestExhibit } from "./wiki/ingest";
-import { getWikiPage, getInboundLinks, wikiStats } from "./wiki/db";
+import { getWikiPage, getInboundLinks, wikiStats, searchWiki } from "./wiki/db";
+import { buildIndexPage, buildLogPage } from "./wiki/index_render";
+import { runLint } from "./wiki/lint";
 
 export type Bindings = {
   DB: D1Database;
@@ -350,6 +355,15 @@ app.get("/wiki/:user/*", async (c) => {
   const rest = c.req.path.replace(/^\/wiki\/[^/]+\//, "").replace(/\/$/, "");
   const path = rest || "index";
   try {
+    // Special live-rendered views.
+    if (path === "index") {
+      const built = await buildIndexPage(c.env.DB, user);
+      return c.html(renderWikiSyntheticPage({ user, path, kind: "index", title: built.title, body: built.body }));
+    }
+    if (path === "log") {
+      const built = await buildLogPage(c.env.DB, user);
+      return c.html(renderWikiSyntheticPage({ user, path, kind: "log", title: built.title, body: built.body }));
+    }
     const page = await getWikiPage(c.env.DB, user, path);
     if (!page) {
       return c.html(renderWikiNotFound({ user, path }), 404);
@@ -378,6 +392,21 @@ app.get("/wiki/:user", async (c) => {
   return c.redirect(`/wiki/${encodeURIComponent(user)}/index`, 302);
 });
 
+// Wiki search
+app.get("/wiki/:user/_search", async (c) => {
+  const user = c.req.param("user");
+  const q = (c.req.query("q") ?? "").trim();
+  let hits: Awaited<ReturnType<typeof searchWiki>> = [];
+  if (q) {
+    try {
+      hits = await searchWiki(c.env.DB, user, q, 30);
+    } catch (e) {
+      console.error("search error", e);
+    }
+  }
+  return c.html(renderWikiSearch({ user, query: q, hits }));
+});
+
 // ───────────────────────────── Admin: ingest ─────────────────────────────
 
 app.post("/admin/ingest/:id", async (c) => {
@@ -392,6 +421,18 @@ app.post("/admin/ingest/:id", async (c) => {
     return c.redirect(`/wiki/${encodeURIComponent(defaultUserId(c.env))}/exhibits/${encodeURIComponent(id)}`, 302);
   } catch (err) {
     console.error("admin ingest error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+app.get("/admin/lint/:user", async (c) => {
+  if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
+  const user = c.req.param("user") || defaultUserId(c.env);
+  try {
+    const findings = await runLint(c.env.DB, user);
+    return c.html(renderLintReport({ user, findings }));
+  } catch (err) {
+    console.error("lint error", err);
     return c.html(renderError(errMsg(err)), 500);
   }
 });

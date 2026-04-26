@@ -9,6 +9,7 @@ export type IngestPromptInput = {
   capturedAt: string;        // ISO
   imageHint?: string;        // path/filename, in case it carries info
   language?: string;         // default "en"
+  existingEntities?: Array<{ kind: string; slug: string; title: string; body: string }>;
 };
 
 export function buildIngestPrompt(input: IngestPromptInput): {
@@ -56,6 +57,18 @@ JSON output rules:
   before trimming the exhibit page.
 `;
 
+  const existingBlock = (input.existingEntities ?? []).length
+    ? `
+
+EXISTING ENTITY PAGES IN THIS WIKI (you may augment any of these by emitting
+an entity_pages item with the same kind+slug; your body will REPLACE the
+existing one, so you MUST preserve the prior content faithfully and add new
+evidence as new sentences. Do NOT silently delete prior facts.):
+
+${(input.existingEntities ?? []).map((e) => `--- ${e.kind}/${e.slug} (${e.title}) ---\n${truncate(e.body, 1200)}`).join("\n\n")}
+`
+    : "";
+
   const user = `Source for exhibit ${input.exhibitId}:
 
 - captured_at: ${input.capturedAt}
@@ -63,7 +76,7 @@ JSON output rules:
 - child's typed reflection:
 """
 ${input.description || "(the child did not type anything)"}
-"""
+"""${existingBlock}
 
 Now produce the JSON envelope per the schema.`;
 
@@ -71,3 +84,8 @@ Now produce the JSON envelope per the schema.`;
 }
 
 export const INGEST_ANALYSIS_VERSION = ANALYSIS_VERSION;
+
+function truncate(s: string, n: number): string {
+  if (!s) return "";
+  return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}

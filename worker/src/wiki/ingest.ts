@@ -8,7 +8,7 @@
 import type { AiProvider } from "../ai";
 import { AiError } from "../ai";
 import { buildIngestPrompt, INGEST_ANALYSIS_VERSION } from "../ai/prompts";
-import { appendWikiLog, getWikiPage } from "./db";
+import { appendWikiLog, getWikiPage, listWikiPages } from "./db";
 import { writePage } from "./write_page";
 import { parseFrontmatter } from "./util";
 
@@ -18,6 +18,7 @@ export type IngestInput = {
   description: string;
   capturedAt: string;
   imageHint?: string;
+  existingEntities?: Array<{ kind: string; slug: string; title: string; body: string }>;
 };
 
 export type IngestResult = {
@@ -68,10 +69,13 @@ export async function ingestExhibit(
     .bind(input.exhibitId)
     .run();
 
+  // Pull up to 30 most-recently-updated entity pages for the LLM to augment.
+  const existingEntities = await loadAugmentContext(db, input.userId);
+
   let envelope: Envelope;
   let rawText = "";
   try {
-    envelope = await callIngestLLM(ai, input);
+    envelope = await callIngestLLM(ai, { ...input, existingEntities });
     rawText = JSON.stringify(envelope).slice(0, 200);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -113,34 +117,26 @@ export async function ingestExhibit(
   // arrives in v0.7). Existing pages keep their body but the wiki_links
   // edge from the new exhibit still points at them, so the page's
   // inbound_links count grows automatically.
-  let entityPagesWritten = 0;
-  let entityPagesSkipped = 0;
+  let entityPagesWritten = 0;       // newly created
+  let entityPagesAugmented = 0;     // existing path, body changed (augmented)
+  let entityPagesUnchanged = 0;     // existing path, body_hash matched
   const entities = envelope.entity_pages ?? [];
   for (const e of entities) {
     const epPath = `${entityPathPrefix(e.kind)}/${e.slug}`;
     const existing = await getWikiPage(db, input.userId, epPath);
-    if (existing) {
-      // bump source_count so the page reflects "N exhibits cite me"
-      await db
-        .prepare(
-          "UPDATE wiki_pages SET source_count = source_count + 1, updated_at = ?3 WHERE user_id = ?1 AND path = ?2",
-        )
-        .bind(input.userId, epPath, new Date().toISOString())
-        .run();
-      entityPagesSkipped++;
-      continue;
-    }
     try {
-      await writePage(db, {
+      const res = await writePage(db, {
         userId: input.userId,
         path: epPath,
         kind: e.kind,
         title: e.title,
         body: e.body,
-        sourceCount: 1,
+        sourceCount: existing ? existing.source_count + 1 : 1,
         lastIngestAt: new Date().toISOString(),
       });
-      entityPagesWritten++;
+      if (!existing) entityPagesWritten++;
+      else if (res.changed) entityPagesAugmented++;
+      else entityPagesUnchanged++;
     } catch (err) {
       console.error("entity write failed", epPath, err instanceof Error ? err.message : err);
     }
@@ -184,11 +180,12 @@ export async function ingestExhibit(
     input.userId,
     "ingest",
     pagePath,
-    `Ingested ${envelope.exhibit_page.title} (${primaryDomain ?? "?"}, conf ${envelope.classify.confidence.toFixed(2)}, +${entityPagesWritten} new entity pages, ${entityPagesSkipped} reused)`,
+    `Ingested ${envelope.exhibit_page.title} (${primaryDomain ?? "?"}, conf ${envelope.classify.confidence.toFixed(2)}, +${entityPagesWritten} new, ${entityPagesAugmented} augmented, ${entityPagesUnchanged} unchanged)`,
     {
       object_type: objectType,
       entity_pages_written: entityPagesWritten,
-      entity_pages_reused: entityPagesSkipped,
+      entity_pages_augmented: entityPagesAugmented,
+      entity_pages_unchanged: entityPagesUnchanged,
       provider: ai.name,
     },
   );
@@ -198,9 +195,29 @@ export async function ingestExhibit(
     pageWritten: true,
     classify: envelope.classify,
     entityPagesWritten,
-    entityPagesSkipped,
+    entityPagesSkipped: entityPagesAugmented + entityPagesUnchanged,
     rawText,
   };
+}
+
+async function loadAugmentContext(
+  db: D1Database,
+  userId: string,
+  limit = 30,
+): Promise<Array<{ kind: string; slug: string; title: string; body: string }>> {
+  const all = await listWikiPages(db, userId);
+  const ENTITY_KINDS_LIST = [
+    "concept", "place", "period", "person", "style",
+    "material", "technique", "theme", "civilization", "museum",
+  ];
+  return all
+    .filter((p) => ENTITY_KINDS_LIST.includes(p.kind))
+    .sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""))
+    .slice(0, limit)
+    .map((p) => {
+      const slug = p.path.split("/").pop() ?? "";
+      return { kind: p.kind, slug, title: p.title, body: p.body };
+    });
 }
 
 function entityPathPrefix(kind: string): string {
