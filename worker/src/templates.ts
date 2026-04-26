@@ -134,8 +134,8 @@ export function renderStudentHome(opts: { user: string; data: DashboardData }): 
     <div class="container dash-hero-inner">
       <div>
         <p class="eyebrow">${escapeHtml(greeting)}, Junior Curator</p>
-        <h1>Your museum, growing one capture at a time.</h1>
-        <p class="lede">A personal wiki of every exhibit you've photographed, organized by what it teaches — not by where you found it.</p>
+        <h1>My Museum Wiki</h1>
+        <p class="lede">Turn every museum visit into a personal learning wiki.</p>
       </div>
       <div class="dash-stats" aria-label="Collection at a glance">
         <div class="dash-stat"><dt>Exhibits</dt><dd>${totals.exhibits.toLocaleString()}</dd></div>
@@ -297,7 +297,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData }): 
     .dash-explore strong { font-size: 1rem; }
     .dash-explore small { font-size: .82rem; color: var(--ink-muted); line-height: 1.4; }
   </style>`;
-  return layout({ title: "MuseIQ — Junior Curator AI", active: "home", body });
+  return layout({ title: "My Museum Wiki — MuseIQ", active: "home", body });
 }
 
 const DOMAIN_EMOJI: Record<string, string> = {
