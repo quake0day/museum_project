@@ -364,20 +364,18 @@ export function renderAdminList(data: {
           const src = "/media/" + it.image.split("/").map(encodeURIComponent).join("/");
           const full = escapeHtml(it.response ?? "");
           const date = escapeHtml(it.date ?? "");
-          const id = encodeURIComponent(it.id);
+          const id = escapeHtml(it.id);
           return `
-      <article class="card">
+      <label class="card admin-card" data-admin-card>
         <div class="card-media">
+          <input type="checkbox" name="ids" value="${id}" class="admin-check" data-admin-check aria-label="Select for deletion" />
           <img src="${src}" alt="Exhibit response" loading="lazy" decoding="async" />
         </div>
         <div class="card-body">
           <p class="card-response">${full || '<span class="muted">(no description)</span>'}</p>
           <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time></p>
-          <form method="POST" action="/admin/delete/${id}" onsubmit="return confirm('Delete this photo permanently? This cannot be undone.');" style="margin-top:.75rem;">
-            <button type="submit" class="btn btn-sm" style="background:#c0392b;color:#fff;border-color:#c0392b;">Delete</button>
-          </form>
         </div>
-      </article>`;
+      </label>`;
         })
         .join("")
     : `<div class="empty">
@@ -432,11 +430,85 @@ export function renderAdminList(data: {
         </div>
       </header>
 
-      <div class="grid">${cards}</div>
+      <form method="POST" action="/admin/delete" id="bulk-delete-form" data-bulk-form>
+        <input type="hidden" name="page" value="${page}" />
+        <input type="hidden" name="q" value="${escapeHtml(query)}" />
+
+        <div class="bulk-bar" style="position:sticky;top:0;z-index:10;display:flex;gap:1rem;align-items:center;flex-wrap:wrap;padding:.75rem 1rem;margin:0 0 1rem;background:var(--bg-elev,#fff);border:1px solid var(--border,#e5e7eb);border-radius:.75rem;box-shadow:0 1px 2px rgba(0,0,0,.04);">
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+            <input type="checkbox" data-bulk-all />
+            <span>Select all on this page</span>
+          </label>
+          <span class="muted" data-bulk-count>0 selected</span>
+          <span style="flex:1;"></span>
+          <button type="submit" class="btn btn-sm" data-bulk-submit disabled style="background:#c0392b;color:#fff;border-color:#c0392b;opacity:.55;">Delete selected</button>
+        </div>
+
+        <style>
+          .admin-card { position: relative; cursor: pointer; }
+          .admin-card .admin-check {
+            position: absolute; top: .5rem; left: .5rem; z-index: 2;
+            width: 1.4rem; height: 1.4rem;
+            accent-color: #c0392b;
+            background: rgba(255,255,255,.92);
+            border-radius: .25rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,.25);
+            cursor: pointer;
+          }
+          .admin-card.is-selected { outline: 3px solid #c0392b; outline-offset: 2px; }
+        </style>
+
+        <div class="grid">${cards}</div>
+      </form>
 
       ${pagination}
     </div>
   </section>
+
+  <script>
+  (function () {
+    var form = document.getElementById('bulk-delete-form');
+    if (!form) return;
+    var all = form.querySelector('[data-bulk-all]');
+    var countEl = form.querySelector('[data-bulk-count]');
+    var submitBtn = form.querySelector('[data-bulk-submit]');
+    var checks = form.querySelectorAll('[data-admin-check]');
+
+    function refresh() {
+      var n = 0;
+      checks.forEach(function (c) {
+        if (c.checked) n++;
+        var card = c.closest('[data-admin-card]');
+        if (card) card.classList.toggle('is-selected', c.checked);
+      });
+      countEl.textContent = n + (n === 1 ? ' selected' : ' selected');
+      submitBtn.disabled = n === 0;
+      submitBtn.style.opacity = n === 0 ? '.55' : '1';
+      if (all) all.checked = n > 0 && n === checks.length;
+    }
+
+    if (all) {
+      all.addEventListener('change', function () {
+        checks.forEach(function (c) { c.checked = all.checked; });
+        refresh();
+      });
+    }
+    checks.forEach(function (c) {
+      c.addEventListener('change', refresh);
+      // prevent the surrounding <label> from toggling twice on direct checkbox click
+      c.addEventListener('click', function (e) { e.stopPropagation(); });
+    });
+    form.addEventListener('submit', function (e) {
+      var n = form.querySelectorAll('[data-admin-check]:checked').length;
+      if (n === 0) { e.preventDefault(); return false; }
+      if (!confirm('Delete ' + n + ' photo' + (n === 1 ? '' : 's') + ' permanently? This cannot be undone.')) {
+        e.preventDefault();
+        return false;
+      }
+    });
+    refresh();
+  })();
+  </script>
   `;
   return layout({
     title: query ? `"${query}" — Admin` : "Admin — MuseIQ",

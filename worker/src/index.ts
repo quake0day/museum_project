@@ -265,14 +265,25 @@ app.get("/admin/photos", async (c) => {
   }
 });
 
-app.post("/admin/delete/:id", async (c) => {
+app.post("/admin/delete", async (c) => {
   if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
-  const id = c.req.param("id");
-  if (!id) return c.redirect("/admin/photos", 302);
   try {
-    const row = await getInteractionById(c.env.DB, id);
-    if (row) {
-      // Best-effort R2 delete first; even if it fails we still drop the DB row.
+    const form = await c.req.formData();
+    const ids = form
+      .getAll("ids")
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+    const pageRaw = form.get("page");
+    const qRaw = form.get("q");
+    const requestedPage = Math.max(
+      1,
+      parsePositiveInt(typeof pageRaw === "string" ? pageRaw : undefined, 1),
+    );
+    const query = typeof qRaw === "string" ? qRaw.trim() : "";
+
+    for (const id of ids) {
+      const row = await getInteractionById(c.env.DB, id);
+      if (!row) continue;
+      // Best-effort R2 delete; even if it fails we still drop the DB row.
       try {
         if (row.image) await c.env.MEDIA.delete(row.image);
       } catch (e) {
@@ -280,7 +291,23 @@ app.post("/admin/delete/:id", async (c) => {
       }
       await deleteInteraction(c.env.DB, id);
     }
-    return c.redirect("/admin/photos", 302);
+
+    // Clamp page to last valid page after deletion so the user lands on a
+    // page that still has content (or page 1 if the archive is empty).
+    const pageSize = parsePositiveInt(c.env.PAGE_SIZE, 12);
+    const { count } = await getInteractions(c.env.DB, {
+      page: 1,
+      pageSize: 1,
+      query,
+    });
+    const totalPages = Math.max(1, Math.ceil(count / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+
+    const params = new URLSearchParams();
+    if (page > 1) params.set("page", String(page));
+    if (query) params.set("q", query);
+    const qs = params.toString();
+    return c.redirect(`/admin/photos${qs ? `?${qs}` : ""}`, 303);
   } catch (err) {
     console.error("admin delete error", err);
     return c.html(renderError(errMsg(err)), 500);
