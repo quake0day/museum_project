@@ -350,6 +350,27 @@ app.post("/admin/delete", async (c) => {
 
 // ───────────────────────────── Wiki render ─────────────────────────────
 
+// Wiki search — MUST register before the /wiki/:user/* catch-all.
+app.get("/wiki/:user/_search", async (c) => {
+  const user = c.req.param("user");
+  const q = (c.req.query("q") ?? "").trim();
+  let hits: Awaited<ReturnType<typeof searchWiki>> = [];
+  if (q) {
+    try {
+      hits = await searchWiki(c.env.DB, user, q, 30);
+    } catch (e) {
+      console.error("search error", e);
+    }
+  }
+  return c.html(renderWikiSearch({ user, query: q, hits }));
+});
+
+// Convenience: /wiki/:user → index page
+app.get("/wiki/:user", async (c) => {
+  const user = c.req.param("user");
+  return c.redirect(`/wiki/${encodeURIComponent(user)}/index`, 302);
+});
+
 app.get("/wiki/:user/*", async (c) => {
   const user = c.req.param("user");
   const rest = c.req.path.replace(/^\/wiki\/[^/]+\//, "").replace(/\/$/, "");
@@ -384,27 +405,6 @@ app.get("/wiki/:user/*", async (c) => {
     console.error("wiki render error", err);
     return c.html(renderError(errMsg(err)), 500);
   }
-});
-
-// Convenience: /wiki/:user → index page
-app.get("/wiki/:user", async (c) => {
-  const user = c.req.param("user");
-  return c.redirect(`/wiki/${encodeURIComponent(user)}/index`, 302);
-});
-
-// Wiki search
-app.get("/wiki/:user/_search", async (c) => {
-  const user = c.req.param("user");
-  const q = (c.req.query("q") ?? "").trim();
-  let hits: Awaited<ReturnType<typeof searchWiki>> = [];
-  if (q) {
-    try {
-      hits = await searchWiki(c.env.DB, user, q, 30);
-    } catch (e) {
-      console.error("search error", e);
-    }
-  }
-  return c.html(renderWikiSearch({ user, query: q, hits }));
 });
 
 // ───────────────────────────── Admin: ingest ─────────────────────────────
