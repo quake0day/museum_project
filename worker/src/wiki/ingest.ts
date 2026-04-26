@@ -61,6 +61,26 @@ export async function ingestExhibit(
   db: D1Database,
   input: IngestInput,
 ): Promise<IngestResult> {
+  try {
+    return await ingestExhibitInner(ai, db, input);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("ingestExhibit unhandled", input.exhibitId, msg);
+    await db
+      .prepare(
+        "UPDATE interactions SET analysis_status = 'failed', analysis_error = ?2, analyzed_at = ?3 WHERE id = ?1",
+      )
+      .bind(input.exhibitId, msg.slice(0, 800), new Date().toISOString())
+      .run();
+    return { status: "failed", pageWritten: false, error: msg };
+  }
+}
+
+async function ingestExhibitInner(
+  ai: AiProvider,
+  db: D1Database,
+  input: IngestInput,
+): Promise<IngestResult> {
   // 1. mark interactions row as running
   await db
     .prepare(

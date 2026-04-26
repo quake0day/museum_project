@@ -448,6 +448,13 @@ app.post("/admin/ingest/:id", async (c) => {
     return c.redirect(`/wiki/${encodeURIComponent(defaultUserId(c.env))}/exhibits/${encodeURIComponent(id)}`, 302);
   } catch (err) {
     console.error("admin ingest error", err);
+    // Make sure the row never gets stuck at 'running' on an unhandled throw.
+    try {
+      await c.env.DB
+        .prepare("UPDATE interactions SET analysis_status = 'failed', analysis_error = ?2, analyzed_at = ?3 WHERE id = ?1 AND analysis_status = 'running'")
+        .bind(id, errMsg(err).slice(0, 800), new Date().toISOString())
+        .run();
+    } catch { /* swallow */ }
     return c.html(renderError(errMsg(err)), 500);
   }
 });
