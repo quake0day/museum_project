@@ -662,6 +662,12 @@ export function renderWikiPage(opts: {
   const html = renderMarkdown(md);
 
   const meta = `<p class="muted" style="margin-top:2rem;font-size:.85rem;">Last updated by AI · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} outbound · ${page.inbound_links} inbound</p>`;
+  const askBtn = `
+    <div style="margin-top:1.25rem;display:flex;gap:.5rem;flex-wrap:wrap;">
+      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">💬 Ask the wiki</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_quiz?p=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">📝 Take a quiz</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_compare?a=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">🔀 Compare with…</a>
+    </div>`;
 
   const inboundHtml = inbound.length
     ? `
@@ -696,6 +702,7 @@ export function renderWikiPage(opts: {
       <article class="wiki-body">
         ${html}
       </article>
+      ${askBtn}
       ${inboundHtml}
       ${meta}
     </div>
@@ -812,6 +819,210 @@ function sanitizeSnippet(s: string): string {
   // FTS5 snippet emits text with <mark>…</mark>. Escape everything else.
   const parts = s.split(/(<\/?mark>)/g);
   return parts.map((p) => (p === "<mark>" || p === "</mark>") ? p : escapeHtml(p)).join("");
+}
+
+export function renderCompare(opts: {
+  user: string;
+  pathA: string;
+  pathB: string;
+  result: { titleA: string; titleB: string; answerMd: string } | null;
+  error: string | null;
+}): string {
+  const { user, pathA, pathB, result, error } = opts;
+  const linkA = pathA ? `/wiki/${encodeURIComponent(user)}/${pathA.split("/").map(encodeURIComponent).join("/")}` : "";
+  const linkB = pathB ? `/wiki/${encodeURIComponent(user)}/${pathB.split("/").map(encodeURIComponent).join("/")}` : "";
+  const body = `
+  <section class="wiki">
+    <div class="container wiki-container">
+      <nav class="wiki-breadcrumb">
+        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <span aria-hidden="true">›</span>
+        <span>compare</span>
+      </nav>
+      <h1>Compare two pages</h1>
+      <form method="get" action="/wiki/${encodeURIComponent(user)}/_compare" class="ask-form" style="flex-direction:column;">
+        <label>Page A path<input type="text" name="a" value="${escapeHtml(pathA)}" placeholder="exhibits/abc-123" /></label>
+        <label>Page B path<input type="text" name="b" value="${escapeHtml(pathB)}" placeholder="exhibits/def-456" /></label>
+        <button class="btn btn-primary" type="submit" style="align-self:flex-start;">Compare</button>
+      </form>
+      ${error ? `<div class="ask-error">${escapeHtml(error)}</div>` : ""}
+      ${result ? `
+        <div class="cmp-heads">
+          <div><strong>A:</strong> <a href="${linkA}">${escapeHtml(result.titleA)}</a></div>
+          <div><strong>B:</strong> <a href="${linkB}">${escapeHtml(result.titleB)}</a></div>
+        </div>
+        <article class="ask-answer">${renderMarkdown(result.answerMd)}</article>
+      ` : ""}
+    </div>
+  </section>
+  <style>
+    .wiki-container { max-width: 760px; }
+    .ask-form label { display:flex; flex-direction:column; gap:.25rem; font-size:.85rem; color:#475569; }
+    .ask-form input { padding: .55rem .75rem; border:1px solid var(--border,#e5e7eb); border-radius:.5rem; font-family: ui-monospace, monospace; }
+    .ask-form { gap: .75rem; margin: 1rem 0; display:flex; flex-direction: column; }
+    .cmp-heads { display:flex; gap: 2rem; flex-wrap: wrap; padding: .75rem 1rem; background: rgba(0,0,0,.03); border-radius: .5rem; margin: 1rem 0; }
+    .ask-answer { padding: 1rem 1.25rem; border:1px solid var(--border,#e5e7eb); border-radius: .8rem; background: var(--bg-elev,#fff); }
+  </style>`;
+  return layout({ title: "Compare — MuseIQ", body });
+}
+
+export function renderQuiz(opts: {
+  user: string;
+  path: string;
+  quiz: { pageTitle: string; pagePath: string; questions: Array<{ prompt: string; type: "mcq" | "free"; choices?: string[]; correct_index?: number; hint?: string; explanation: string }> };
+}): string {
+  const { user, path, quiz } = opts;
+  const pageHref = `/wiki/${encodeURIComponent(user)}/${quiz.pagePath.split("/").map(encodeURIComponent).join("/")}`;
+  const items = quiz.questions.map((q, i) => {
+    if (q.type === "mcq" && q.choices) {
+      const opts = q.choices.map((c, j) => `<label class="quiz-opt">
+        <input type="radio" name="q${i}" value="${j}" data-correct="${q.correct_index === j ? 1 : 0}" />
+        <span>${escapeHtml(c)}</span>
+      </label>`).join("");
+      return `<li class="quiz-q" data-q="${i}" data-type="mcq" data-explanation="${escapeHtml(q.explanation)}">
+        <h3>${i + 1}. ${escapeHtml(q.prompt)}</h3>
+        ${q.hint ? `<p class="quiz-hint">💡 ${escapeHtml(q.hint)}</p>` : ""}
+        <div class="quiz-opts">${opts}</div>
+        <p class="quiz-feedback" hidden></p>
+      </li>`;
+    }
+    return `<li class="quiz-q" data-q="${i}" data-type="free" data-explanation="${escapeHtml(q.explanation)}">
+      <h3>${i + 1}. ${escapeHtml(q.prompt)}</h3>
+      ${q.hint ? `<p class="quiz-hint">💡 ${escapeHtml(q.hint)}</p>` : ""}
+      <textarea name="q${i}" rows="3" placeholder="Type your thought…"></textarea>
+      <p class="quiz-feedback" hidden></p>
+    </li>`;
+  }).join("");
+
+  const body = `
+  <section class="wiki">
+    <div class="container wiki-container">
+      <nav class="wiki-breadcrumb">
+        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <span aria-hidden="true">›</span>
+        <a href="${pageHref}">${escapeHtml(quiz.pageTitle)}</a>
+        <span aria-hidden="true">›</span>
+        <span>quiz</span>
+      </nav>
+      <p class="eyebrow">Quick quiz</p>
+      <h1>${escapeHtml(quiz.pageTitle)}</h1>
+      <p class="muted">${quiz.questions.length} questions · click an answer to see how you did.</p>
+      <ol class="quiz-list">${items}</ol>
+      <button id="quiz-grade" class="btn btn-primary" type="button">Grade my quiz</button>
+      <p id="quiz-score" class="muted" style="margin-top:.75rem;"></p>
+      <p style="margin-top:1rem;"><a href="${pageHref}">← Back to page</a></p>
+    </div>
+  </section>
+  <style>
+    .wiki-container { max-width: 760px; }
+    .quiz-list { list-style: none; padding: 0; margin: 1rem 0 1.5rem; display: grid; gap: .75rem; }
+    .quiz-q { padding: 1rem 1.25rem; border:1px solid var(--border,#e5e7eb); border-radius: .8rem; background: var(--bg-elev,#fff); }
+    .quiz-q h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
+    .quiz-hint { font-size:.85rem; color:#475569; margin: 0 0 .5rem; }
+    .quiz-opts { display: grid; gap: .35rem; }
+    .quiz-opt { display:flex; gap:.5rem; padding: .4rem .6rem; border:1px solid var(--border,#e5e7eb); border-radius:.5rem; cursor:pointer; }
+    .quiz-opt input { margin-top: .2rem; }
+    .quiz-opt.right { background:#dcfce7; border-color:#86efac; }
+    .quiz-opt.wrong { background:#fee2e2; border-color:#fca5a5; }
+    .quiz-q textarea { width: 100%; padding: .5rem .65rem; border:1px solid var(--border,#e5e7eb); border-radius: .4rem; font-family: inherit; }
+    .quiz-feedback { font-size:.9rem; padding:.5rem .65rem; border-radius:.4rem; background: rgba(14,165,233,.08); color: #0c4a6e; margin: .5rem 0 0; }
+  </style>
+  <script>
+  (function () {
+    var grade = document.getElementById('quiz-grade');
+    var scoreEl = document.getElementById('quiz-score');
+    if (!grade) return;
+    grade.addEventListener('click', function () {
+      var qs = document.querySelectorAll('.quiz-q');
+      var right = 0, total = 0;
+      qs.forEach(function (q) {
+        var type = q.getAttribute('data-type');
+        var fb = q.querySelector('.quiz-feedback');
+        var explanation = q.getAttribute('data-explanation') || '';
+        if (type === 'mcq') {
+          total++;
+          var opts = q.querySelectorAll('.quiz-opt input');
+          var correctIdx = -1;
+          var pickedIdx = -1;
+          opts.forEach(function (input, i) {
+            if (input.getAttribute('data-correct') === '1') correctIdx = i;
+            if (input.checked) pickedIdx = i;
+          });
+          opts.forEach(function (input, i) {
+            var label = input.parentElement;
+            if (i === correctIdx) label.classList.add('right');
+            else if (i === pickedIdx) label.classList.add('wrong');
+            input.disabled = true;
+          });
+          if (pickedIdx === correctIdx) right++;
+          fb.hidden = false;
+          fb.textContent = (pickedIdx === correctIdx ? '✅ ' : '✏️ ') + explanation;
+        } else {
+          fb.hidden = false;
+          fb.textContent = '✏️ ' + explanation;
+        }
+      });
+      grade.disabled = true;
+      grade.style.opacity = '.55';
+      scoreEl.textContent = 'You got ' + right + ' of ' + total + ' multiple-choice questions right.';
+    });
+  })();
+  </script>`;
+  return layout({ title: `Quiz: ${quiz.pageTitle} — MuseIQ`, body });
+}
+
+export function renderWikiAsk(opts: {
+  user: string;
+  question: string;
+  contextPath?: string;
+  answer: { answerMd: string; citations: Array<{ path: string; title: string; kind: string }>; shortlistedPaths: string[] } | null;
+  error: string | null;
+}): string {
+  const { user, question, contextPath, answer, error } = opts;
+  const answerHtml = answer ? renderMarkdown(answer.answerMd) : "";
+  const citationsHtml = answer && answer.citations.length
+    ? `<aside class="ask-cites">
+        <h3>Pages I read</h3>
+        <ul>
+          ${answer.citations.map((c) => {
+            const href = `/wiki/${encodeURIComponent(user)}/${c.path.split("/").map(encodeURIComponent).join("/")}`;
+            return `<li><a href="${href}">${escapeHtml(c.title)}</a> <span class="muted">· ${escapeHtml(c.kind)}</span></li>`;
+          }).join("")}
+        </ul>
+      </aside>`
+    : "";
+  const body = `
+  <section class="wiki">
+    <div class="container wiki-container">
+      <nav class="wiki-breadcrumb">
+        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <span aria-hidden="true">›</span>
+        <span>ask</span>
+      </nav>
+      <h1>Ask the wiki</h1>
+      <p class="muted">Ask anything about the exhibits you've captured. Answers come from your own wiki pages — with citations so you can read more.</p>
+      <form method="get" action="/wiki/${encodeURIComponent(user)}/_ask" class="ask-form">
+        ${contextPath ? `<input type="hidden" name="about" value="${escapeHtml(contextPath)}" />` : ""}
+        <textarea name="q" rows="3" placeholder="e.g. What was bronze used for? Why are these styles different?" autofocus>${escapeHtml(question)}</textarea>
+        <button class="btn btn-primary" type="submit">Ask</button>
+      </form>
+      ${error ? `<div class="ask-error">${escapeHtml(error)}</div>` : ""}
+      ${answer ? `<article class="ask-answer">${answerHtml}</article>${citationsHtml}` : ""}
+    </div>
+  </section>
+  <style>
+    .wiki-container { max-width: 760px; }
+    .ask-form { display:flex; gap:.5rem; margin: 1.25rem 0; align-items:stretch; flex-direction: column; }
+    .ask-form textarea { padding: .65rem .8rem; border:1px solid var(--border,#e5e7eb); border-radius:.6rem; font-size: 1rem; resize: vertical; font-family: inherit; }
+    .ask-form button { align-self: flex-start; }
+    .ask-error { padding: .75rem 1rem; background:#fee2e2; border:1px solid #fca5a5; border-radius: .5rem; color:#991b1b; margin: 1rem 0; }
+    .ask-answer { padding: 1rem 1.25rem; border:1px solid var(--border,#e5e7eb); border-radius: .8rem; background: var(--bg-elev,#fff); margin-top: 1.25rem; }
+    .ask-answer p { line-height: 1.6; }
+    .ask-cites { margin-top: 1rem; padding: .75rem 1rem; background: rgba(0,0,0,.02); border:1px dashed var(--border,#e5e7eb); border-radius: .6rem; font-size: .9rem; }
+    .ask-cites h3 { margin: 0 0 .4rem; font-size: .9rem; }
+    .ask-cites ul { padding-left: 1.2rem; margin: 0; }
+  </style>`;
+  return layout({ title: question ? `${question} — Wiki ask` : "Ask the wiki", body });
 }
 
 export function renderQuests(opts: {

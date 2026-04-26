@@ -20,6 +20,9 @@ import {
   renderTimeline,
   renderMap,
   renderQuests,
+  renderWikiAsk,
+  renderCompare,
+  renderQuiz,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -37,6 +40,9 @@ import { buildIndexPage, buildLogPage } from "./wiki/index_render";
 import { runLint } from "./wiki/lint";
 import { getMapPoints, getTimelinePoints } from "./wiki/views";
 import { evaluateQuests } from "./wiki/quests";
+import { askWiki } from "./wiki/query";
+import { comparePages } from "./wiki/compare";
+import { generateQuiz } from "./wiki/quiz";
 
 export type Bindings = {
   DB: D1Database;
@@ -354,6 +360,96 @@ app.post("/admin/delete", async (c) => {
 });
 
 // ───────────────────────────── Wiki render ─────────────────────────────
+
+// Wiki compare — register before the catch-all.
+app.get("/wiki/:user/_compare", async (c) => {
+  const user = c.req.param("user");
+  const a = (c.req.query("a") ?? "").trim();
+  const b = (c.req.query("b") ?? "").trim();
+  let result: Awaited<ReturnType<typeof comparePages>> | null = null;
+  let error: string | null = null;
+  if (a && b) {
+    if (!c.env.DEEPSEEK_API_KEY) error = "AI provider not configured.";
+    else {
+      try {
+        const ai = getAiProvider(c.env);
+        result = await comparePages(ai, c.env.DB, { userId: user, pathA: a, pathB: b });
+      } catch (err) {
+        error = errMsg(err);
+      }
+    }
+  }
+  return c.html(renderCompare({ user, pathA: a, pathB: b, result, error }));
+});
+
+// Wiki quiz — register before the catch-all.
+app.get("/wiki/:user/_quiz", async (c) => {
+  const user = c.req.param("user");
+  const path = c.req.query("p");
+  if (!path) return c.html(renderError("missing ?p=<wiki path>"), 400);
+  if (!c.env.DEEPSEEK_API_KEY) return c.html(renderError("AI provider not configured"), 500);
+  try {
+    const ai = getAiProvider(c.env);
+    const quiz = await generateQuiz(ai, c.env.DB, { userId: user, path });
+    return c.html(renderQuiz({ user, path, quiz }));
+  } catch (err) {
+    console.error("quiz error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+// Wiki ask — MUST register before the /wiki/:user/* catch-all.
+app.get("/wiki/:user/_ask", async (c) => {
+  const user = c.req.param("user");
+  const question = (c.req.query("q") ?? "").trim();
+  const contextPath = c.req.query("about") ?? undefined;
+  let answer: Awaited<ReturnType<typeof askWiki>> | null = null;
+  let error: string | null = null;
+  if (question) {
+    if (!c.env.DEEPSEEK_API_KEY) {
+      error = "AI provider not configured.";
+    } else {
+      try {
+        const ai = getAiProvider(c.env);
+        answer = await askWiki(ai, c.env.DB, { userId: user, question, contextPath });
+      } catch (err) {
+        console.error("ask error", err);
+        error = errMsg(err);
+      }
+    }
+  }
+  return c.html(renderWikiAsk({ user, question, contextPath, answer, error }));
+});
+
+app.post("/api/wiki/:user/ask", async (c) => {
+  const user = c.req.param("user");
+  if (!c.env.DEEPSEEK_API_KEY) return c.json({ error: "AI provider not configured" }, 503);
+  let body: { question?: string; context_path?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "expected JSON {question, context_path?}" }, 400);
+  }
+  if (!body.question || typeof body.question !== "string") {
+    return c.json({ error: "question required" }, 400);
+  }
+  try {
+    const ai = getAiProvider(c.env);
+    const out = await askWiki(ai, c.env.DB, {
+      userId: user,
+      question: body.question,
+      contextPath: body.context_path,
+    });
+    return c.json({
+      answer_md: out.answerMd,
+      citations: out.citations,
+      shortlisted: out.shortlistedPaths,
+    });
+  } catch (err) {
+    console.error("ask api error", err);
+    return c.json({ error: errMsg(err) }, 500);
+  }
+});
 
 // Wiki search — MUST register before the /wiki/:user/* catch-all.
 app.get("/wiki/:user/_search", async (c) => {
