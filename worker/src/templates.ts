@@ -213,16 +213,32 @@ export function renderList(data: {
           const src = "/media/" + it.image.split("/").map(encodeURIComponent).join("/");
           const full = escapeHtml(it.response ?? "");
           const date = escapeHtml(it.date ?? "");
+          const summary = it.child_summary ? escapeHtml(it.child_summary) : "";
+          const domain = it.primary_domain ?? null;
+          const domainEmoji = domain
+            ? ({ history: "🏺", art: "🎨", science: "🦖", tech: "⚙️", technology: "⚙️", culture: "🌍" }[domain] ?? "")
+            : "";
+          const wikiHref = it.analysis_status === "done"
+            ? `/wiki/default/exhibits/${encodeURIComponent(it.id)}`
+            : null;
+          // When the wiki page exists, the whole card becomes a link to it.
+          // Otherwise the lightbox-trigger keeps its zoom-on-click behavior.
+          const cardOpen = wikiHref
+            ? `<a class="card card-link" href="${wikiHref}">`
+            : `<article class="card" data-lightbox-trigger data-src="${src}" data-caption="${escapeHtml(it.response ?? "")}">`;
+          const cardClose = wikiHref ? `</a>` : `</article>`;
           return `
-      <article class="card" data-lightbox-trigger data-src="${src}" data-caption="${escapeHtml(it.response ?? "")}">
+      ${cardOpen}
         <div class="card-media">
           <img src="${src}" alt="Exhibit response" loading="lazy" decoding="async" />
         </div>
         <div class="card-body">
+          ${domain ? `<span class="card-domain">${domainEmoji} ${escapeHtml(domain)}</span>` : ""}
+          ${summary ? `<p class="card-summary">${summary}</p>` : ""}
           <p class="card-response">${full || '<span class="muted">(no description)</span>'}</p>
-          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time></p>
+          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time>${wikiHref ? ` · <span>open wiki →</span>` : ""}</p>
         </div>
-      </article>`;
+      ${cardClose}`;
         })
         .join("")
     : `<div class="empty">
@@ -314,6 +330,12 @@ export function renderList(data: {
     </div>
   </section>
 
+  <style>
+    .card-link { color: inherit; text-decoration: none; display: flex; flex-direction: column; }
+    .card-link:hover { transform: translateY(-2px); transition: transform .15s ease; }
+    .card-domain { display:inline-block; font-size:.7rem; padding:.1rem .5rem; border-radius:999px; background:#ecfeff; border:1px solid #a5f3fc; color:#155e75; margin-bottom:.4rem; }
+    .card-summary { font-size:.9rem; color:#475569; margin: 0 0 .5rem; line-height:1.4; }
+  </style>
   <div class="lightbox" data-lightbox hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Image viewer">
     <button class="lightbox-close" type="button" aria-label="Close" data-lightbox-close>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -601,8 +623,10 @@ export function renderWikiPage(opts: {
   user: string;
   page: WikiPageRow;
   imageSrc: string | null;
+  inbound?: Array<{ path: string; title: string; kind: string; relation: string | null }>;
 }): string {
   const { user, page, imageSrc } = opts;
+  const inbound = opts.inbound ?? [];
   let fm: Record<string, unknown> = {};
   try {
     fm = page.frontmatter_json ? JSON.parse(page.frontmatter_json) : {};
@@ -632,6 +656,20 @@ export function renderWikiPage(opts: {
 
   const meta = `<p class="muted" style="margin-top:2rem;font-size:.85rem;">Last updated by AI · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} outbound · ${page.inbound_links} inbound</p>`;
 
+  const inboundHtml = inbound.length
+    ? `
+    <aside class="wiki-inbound" aria-label="Pages that link here">
+      <h3>Where you've seen it <span class="muted">(${inbound.length})</span></h3>
+      <ul>
+        ${inbound.map((l) => {
+          const href = `/wiki/${encodeURIComponent(user)}/${l.path.split("/").map(encodeURIComponent).join("/")}`;
+          const rel = l.relation ? `<span class="rel-tag">${escapeHtml(l.relation)}</span>` : "";
+          return `<li><a href="${href}">${escapeHtml(l.title)}</a> <span class="muted">· ${escapeHtml(l.kind)}</span>${rel}</li>`;
+        }).join("")}
+      </ul>
+    </aside>`
+    : "";
+
   const imageHtml = imageSrc
     ? `<figure class="wiki-figure"><img src="${imageSrc}" alt="${escapeHtml(page.title)}" /></figure>`
     : "";
@@ -651,6 +689,7 @@ export function renderWikiPage(opts: {
       <article class="wiki-body">
         ${html}
       </article>
+      ${inboundHtml}
       ${meta}
     </div>
   </section>
@@ -669,6 +708,11 @@ export function renderWikiPage(opts: {
     .wiki-body blockquote { border-left: 3px solid var(--accent,#0ea5e9); margin: 1.25rem 0; padding: .25rem 1rem; color: #334155; font-style: italic; background: rgba(14,165,233,.05); border-radius: 0 .5rem .5rem 0; }
     .wiki-body ul li.task { list-style: none; margin-left: -1.25rem; }
     .wiki-body a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    .wiki-inbound { margin-top: 2.5rem; padding: 1rem 1.25rem; border: 1px dashed var(--border,#e5e7eb); border-radius: .75rem; background: rgba(0,0,0,.02); }
+    .wiki-inbound h3 { margin: 0 0 .75rem; font-size: 1rem; }
+    .wiki-inbound ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
+    .wiki-inbound li { font-size: .9rem; }
+    .wiki-inbound .rel-tag { display: inline-block; margin-left: .35rem; padding: 0 .4rem; border-radius: 4px; background: rgba(14,165,233,.12); font-size: .7rem; color: #0369a1; }
   </style>`;
   return layout({ title: `${page.title} — MuseIQ Wiki`, body });
 }

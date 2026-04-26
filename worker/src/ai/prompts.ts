@@ -1,6 +1,6 @@
 import schema from "../wiki/SCHEMA.md";
 
-const ANALYSIS_VERSION = 1;
+const ANALYSIS_VERSION = 2;
 
 export type IngestPromptInput = {
   exhibitId: string;
@@ -38,17 +38,22 @@ ${schema as unknown as string}
 JSON output rules:
 - Return a single JSON object. No markdown fence around the JSON. No prose
   before or after.
-- Keys: classify, exhibit_page, linked_entities.
+- Top-level keys: classify, exhibit_page, entity_pages.
 - exhibit_page.frontmatter is the parsed object form of the YAML you also
-  embed at the top of exhibit_page.body — they MUST agree.
-- linked_entities is a flat array; each item: {kind, slug, title}. 3–10
-  items typical. Only include entities you actually reference in the body.
-- If confidence < 0.3, set kind = "exhibit_unknown" in frontmatter and
-  produce a short body that asks the child for more clues. linked_entities
-  may be empty.
+  embed at the top of exhibit_page.body — they MUST agree exactly.
+- exhibit_page.frontmatter MUST include the three age-graded summaries
+  (summary_5_7, summary_8_10, summary_11_13) when confidence ≥ 0.5.
+- entity_pages: 3–10 items typical. Each item is a fully-formed wiki page
+  ({kind, slug, title, body}) where body is valid markdown WITH frontmatter,
+  following the entity-page section structure. Only include entities you
+  reference in the exhibit body.
+- If confidence < 0.3, set kind = "exhibit_unknown" in frontmatter, write a
+  short body asking the child for more clues, and return entity_pages = [].
 - Substitute the literal string {user} for the user id in any internal
-  links — the runtime will replace it. Example:
+  links — the runtime replaces it. Example:
     [Bronze Age](/wiki/{user}/concepts/bronze-age) <!-- rel:teaches -->
+- Keep total response under ~3500 tokens. If you must trim, drop entity_pages
+  before trimming the exhibit page.
 `;
 
   const user = `Source for exhibit ${input.exhibitId}:

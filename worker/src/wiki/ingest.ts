@@ -8,8 +8,9 @@
 import type { AiProvider } from "../ai";
 import { AiError } from "../ai";
 import { buildIngestPrompt, INGEST_ANALYSIS_VERSION } from "../ai/prompts";
-import { appendWikiLog } from "./db";
+import { appendWikiLog, getWikiPage } from "./db";
 import { writePage } from "./write_page";
+import { parseFrontmatter } from "./util";
 
 export type IngestInput = {
   exhibitId: string;
@@ -24,7 +25,8 @@ export type IngestResult = {
   pageWritten: boolean;
   error?: string;
   classify?: ClassifyOut;
-  linkedEntities?: LinkedEntity[];
+  entityPagesWritten?: number;
+  entityPagesSkipped?: number;
   rawText?: string;
 };
 
@@ -36,7 +38,12 @@ type ClassifyOut = {
   notes?: string;
 };
 
-type LinkedEntity = { kind: string; slug: string; title: string };
+type EntityPage = {
+  kind: string;
+  slug: string;
+  title: string;
+  body: string;          // full markdown including frontmatter
+};
 
 type Envelope = {
   classify: ClassifyOut;
@@ -45,7 +52,7 @@ type Envelope = {
     frontmatter: Record<string, unknown>;
     body: string;
   };
-  linked_entities?: LinkedEntity[];
+  entity_pages?: EntityPage[];
 };
 
 export async function ingestExhibit(
@@ -102,6 +109,43 @@ export async function ingestExhibit(
     lastIngestAt: new Date().toISOString(),
   });
 
+  // 3.5 write entity pages (first-write-wins for v0.6 — augmenting prose
+  // arrives in v0.7). Existing pages keep their body but the wiki_links
+  // edge from the new exhibit still points at them, so the page's
+  // inbound_links count grows automatically.
+  let entityPagesWritten = 0;
+  let entityPagesSkipped = 0;
+  const entities = envelope.entity_pages ?? [];
+  for (const e of entities) {
+    const epPath = `${entityPathPrefix(e.kind)}/${e.slug}`;
+    const existing = await getWikiPage(db, input.userId, epPath);
+    if (existing) {
+      // bump source_count so the page reflects "N exhibits cite me"
+      await db
+        .prepare(
+          "UPDATE wiki_pages SET source_count = source_count + 1, updated_at = ?3 WHERE user_id = ?1 AND path = ?2",
+        )
+        .bind(input.userId, epPath, new Date().toISOString())
+        .run();
+      entityPagesSkipped++;
+      continue;
+    }
+    try {
+      await writePage(db, {
+        userId: input.userId,
+        path: epPath,
+        kind: e.kind,
+        title: e.title,
+        body: e.body,
+        sourceCount: 1,
+        lastIngestAt: new Date().toISOString(),
+      });
+      entityPagesWritten++;
+    } catch (err) {
+      console.error("entity write failed", epPath, err instanceof Error ? err.message : err);
+    }
+  }
+
   // 4. update interactions row
   const childSummary = extractChildSummary(bodyMd);
   await db
@@ -140,10 +184,11 @@ export async function ingestExhibit(
     input.userId,
     "ingest",
     pagePath,
-    `Ingested ${envelope.exhibit_page.title} (${primaryDomain ?? "?"}, conf ${envelope.classify.confidence.toFixed(2)})`,
+    `Ingested ${envelope.exhibit_page.title} (${primaryDomain ?? "?"}, conf ${envelope.classify.confidence.toFixed(2)}, +${entityPagesWritten} new entity pages, ${entityPagesSkipped} reused)`,
     {
       object_type: objectType,
-      linked_entities: envelope.linked_entities?.length ?? 0,
+      entity_pages_written: entityPagesWritten,
+      entity_pages_reused: entityPagesSkipped,
       provider: ai.name,
     },
   );
@@ -152,9 +197,27 @@ export async function ingestExhibit(
     status: "done",
     pageWritten: true,
     classify: envelope.classify,
-    linkedEntities: envelope.linked_entities ?? [],
+    entityPagesWritten,
+    entityPagesSkipped,
     rawText,
   };
+}
+
+function entityPathPrefix(kind: string): string {
+  // Pluralize entity kinds for path prefix per SCHEMA.md.
+  const map: Record<string, string> = {
+    concept: "concepts",
+    place: "places",
+    period: "periods",
+    person: "people",
+    style: "styles",
+    material: "materials",
+    technique: "techniques",
+    theme: "themes",
+    civilization: "civilizations",
+    museum: "museums",
+  };
+  return map[kind] ?? kind;
 }
 
 // ─── LLM call + parsing ─────────────────────────────────────────────
@@ -230,7 +293,24 @@ function validateEnvelope(obj: unknown): Envelope {
     ? (ep.frontmatter as Record<string, unknown>)
     : {};
 
-  const linked = Array.isArray(o.linked_entities) ? (o.linked_entities as LinkedEntity[]) : [];
+  // entity_pages — accept absent or empty, validate items leniently
+  const rawEntities = Array.isArray(o.entity_pages) ? o.entity_pages : [];
+  const entity_pages: EntityPage[] = [];
+  for (const e of rawEntities) {
+    if (!e || typeof e !== "object") continue;
+    const er = e as Record<string, unknown>;
+    if (typeof er.kind !== "string" || typeof er.slug !== "string" ||
+        typeof er.title !== "string" || typeof er.body !== "string") continue;
+    if (!ENTITY_KINDS.has(er.kind)) continue;
+    if (er.body.length < 30) continue;
+    entity_pages.push({
+      kind: er.kind,
+      slug: slugSafe(er.slug),
+      title: er.title.trim().slice(0, 120),
+      body: er.body,
+    });
+    if (entity_pages.length >= 12) break;
+  }
 
   return {
     classify: {
@@ -245,8 +325,17 @@ function validateEnvelope(obj: unknown): Envelope {
       frontmatter: fm,
       body: String(ep.body),
     },
-    linked_entities: linked,
+    entity_pages,
   };
+}
+
+const ENTITY_KINDS = new Set([
+  "concept", "place", "period", "person", "style",
+  "material", "technique", "theme", "civilization", "museum",
+]);
+
+function slugSafe(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
 }
 
 // If the LLM forgot the YAML frontmatter at the top of the body, prepend it

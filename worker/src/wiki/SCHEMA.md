@@ -84,6 +84,11 @@ styles:        []
 approx_year:   -1000                   # negative = BCE, integer year. Single point.
 origin_lat:    35.0
 origin_lon:    113.0
+
+# age-graded summaries — short, calibrated to reading level
+summary_5_7:   "Long ago people made fancy bowls out of metal for special meals."
+summary_8_10:  "This is a bronze cup used by ancient Chinese kings during ceremonies for their ancestors."
+summary_11_13: "A piece-mold cast bronze ritual vessel from Shang or Zhou-dynasty China, used in ancestor-worship ceremonies that reinforced rulers' authority."
 ```
 
 ### `exhibit_unknown` pages
@@ -241,19 +246,41 @@ Your ingest call returns a single JSON object:
   "exhibit_page": {
     "title": "Bronze Ritual Vessel",
     "frontmatter": { ... },
-    "body": "# Bronze Ritual Vessel\n\n> ...\n\n## What is it?\n..."
+    "body": "---\n...\n---\n\n# Bronze Ritual Vessel\n\n> ...\n\n## What is it?\n..."
   },
-  "linked_entities": [
-    { "kind": "concept",  "slug": "bronze-age",     "title": "Bronze Age" },
-    { "kind": "period",   "slug": "shang-dynasty",  "title": "Shang Dynasty" },
-    { "kind": "material", "slug": "bronze",         "title": "Bronze" },
-    { "kind": "place",    "slug": "china",          "title": "China" }
+  "entity_pages": [
+    {
+      "kind": "concept",
+      "slug": "bronze-age",
+      "title": "Bronze Age",
+      "body": "---\nkind: concept\ntitle: Bronze Age\nanalysis_version: 1\n---\n\n# Bronze Age\n\n> The time when humans first learned to make tools and art from bronze.\n\n## What is it?\n...\n\n## Why it matters\n...\n\n## Where you've seen it\n*This list grows as you capture more bronze objects.*\n\n## Related\n- [Material: Bronze](/wiki/{user}/materials/bronze)\n"
+    },
+    {
+      "kind": "period",
+      "slug": "shang-dynasty",
+      "title": "Shang Dynasty",
+      "body": "..."
+    }
   ]
 }
 ```
 
-In v0.5, `linked_entities` is a hint list — the system uses it to *plan*
-entity-page creation. Actual entity-page bodies are composed in v0.6+.
+Rules for `entity_pages`:
+
+- 3–10 items per ingest typical; only entities you actually reference in
+  the exhibit page body.
+- Each `body` is a complete, valid markdown page with frontmatter, ready to
+  write as-is.
+- Frontmatter MUST include `kind`, `title`, `analysis_version: 1`.
+- Body MUST follow the entity-page section structure: opening blockquote
+  one-sentence definition, `## What is it?`, `## Why it matters`,
+  `## Where you've seen it` (with placeholder text — runtime grows it),
+  `## Related`.
+- Use the literal `{user}` placeholder in any internal links — the runtime
+  substitutes it.
+- If an entity already exists in this child's wiki, the runtime will *not*
+  overwrite the page in v0.6. Just emit your best fresh body anyway; the
+  runtime decides.
 
 ## What you must never do
 

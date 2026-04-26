@@ -134,6 +134,29 @@ export async function replaceWikiLinks(
     .run();
 }
 
+// Pages that link TO `dst_path`. Joined to wiki_pages so we can render a
+// preview list with title + summary chip on entity pages.
+export async function getInboundLinks(
+  db: D1Database,
+  userId: string,
+  dstPath: string,
+  limit = 50,
+): Promise<Array<{ path: string; title: string; kind: string; relation: string | null }>> {
+  const res = await db
+    .prepare(
+      `SELECT wp.path, wp.title, wp.kind, wl.relation
+         FROM wiki_links wl
+         JOIN wiki_pages wp
+           ON wp.user_id = wl.user_id AND wp.path = wl.src_path
+        WHERE wl.user_id = ?1 AND wl.dst_path = ?2
+        ORDER BY wp.updated_at DESC
+        LIMIT ?3`,
+    )
+    .bind(userId, dstPath, limit)
+    .all<{ path: string; title: string; kind: string; relation: string | null }>();
+  return res.results ?? [];
+}
+
 export async function appendWikiLog(
   db: D1Database,
   userId: string,

@@ -26,7 +26,7 @@ import {
 } from "./util";
 import { getAiProvider } from "./ai";
 import { ingestExhibit } from "./wiki/ingest";
-import { getWikiPage, wikiStats } from "./wiki/db";
+import { getWikiPage, getInboundLinks, wikiStats } from "./wiki/db";
 
 export type Bindings = {
   DB: D1Database;
@@ -361,7 +361,11 @@ app.get("/wiki/:user/*", async (c) => {
       const row = await getInteractionById(c.env.DB, exhibitId);
       if (row) imageSrc = "/media/" + row.image.split("/").map(encodeURIComponent).join("/");
     }
-    return c.html(renderWikiPage({ user, page, imageSrc }));
+    // Inbound links — only useful on entity pages where many exhibits cite back.
+    const inbound = page.kind !== "exhibit" && page.kind !== "exhibit_unknown"
+      ? await getInboundLinks(c.env.DB, user, path, 30)
+      : [];
+    return c.html(renderWikiPage({ user, page, imageSrc, inbound }));
   } catch (err) {
     console.error("wiki render error", err);
     return c.html(renderError(errMsg(err)), 500);
