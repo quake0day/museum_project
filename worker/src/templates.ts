@@ -329,6 +329,121 @@ export function renderList(data: {
   });
 }
 
+export function renderAdminLogin(opts: { error?: string } = {}): string {
+  const err = opts.error ? `<p class="form-error" role="alert">${escapeHtml(opts.error)}</p>` : "";
+  const body = `
+  <section class="error-screen">
+    <div class="container error-inner" style="max-width:420px;">
+      <p class="eyebrow">Admin</p>
+      <h1>Sign in</h1>
+      <p class="muted">Enter the admin password to manage the archive.</p>
+      ${err}
+      <form method="POST" action="/admin/login" class="search" style="display:flex;gap:.5rem;margin-top:1rem;">
+        <input type="password" name="password" placeholder="Password" autocomplete="current-password" required autofocus aria-label="Admin password" style="flex:1;" />
+        <button type="submit" class="btn btn-primary">Sign in</button>
+      </form>
+    </div>
+  </section>`;
+  return layout({ title: "Admin — MuseIQ", body });
+}
+
+export function renderAdminList(data: {
+  interactions: InteractionRow[];
+  page: number;
+  totalPages: number;
+  count: number;
+  query: string;
+  hasPrev: boolean;
+  hasNext: boolean;
+}): string {
+  const { interactions, page, totalPages, count, query, hasPrev, hasNext } = data;
+
+  const cards = interactions.length
+    ? interactions
+        .map((it) => {
+          const src = "/media/" + it.image.split("/").map(encodeURIComponent).join("/");
+          const full = escapeHtml(it.response ?? "");
+          const date = escapeHtml(it.date ?? "");
+          const id = encodeURIComponent(it.id);
+          return `
+      <article class="card">
+        <div class="card-media">
+          <img src="${src}" alt="Exhibit response" loading="lazy" decoding="async" />
+        </div>
+        <div class="card-body">
+          <p class="card-response">${full || '<span class="muted">(no description)</span>'}</p>
+          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time></p>
+          <form method="POST" action="/admin/delete/${id}" onsubmit="return confirm('Delete this photo permanently? This cannot be undone.');" style="margin-top:.75rem;">
+            <button type="submit" class="btn btn-sm" style="background:#c0392b;color:#fff;border-color:#c0392b;">Delete</button>
+          </form>
+        </div>
+      </article>`;
+        })
+        .join("")
+    : `<div class="empty">
+        <h3>${query ? "No matching interactions" : "No interactions yet"}</h3>
+        <p>${
+          query
+            ? `Nothing matches "${escapeHtml(query)}".`
+            : "Once the iOS app submits interactions, they will appear here."
+        }</p>
+      </div>`;
+
+  const win = 2;
+  const start = Math.max(1, page - win);
+  const end = Math.min(totalPages, page + win);
+  const windowPages: number[] = [];
+  for (let i = start; i <= end; i++) windowPages.push(i);
+
+  const qp = (p: number) =>
+    `?page=${p}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
+
+  const pagination =
+    totalPages > 1
+      ? `
+      <nav class="pagination" aria-label="Pagination">
+        ${hasPrev ? `<a href="${qp(page - 1)}" class="page-link" rel="prev">← Prev</a>` : `<span class="page-link disabled">← Prev</span>`}
+        ${start > 1 ? `<a href="${qp(1)}" class="page-link">1</a>${start > 2 ? '<span class="gap" aria-hidden="true">…</span>' : ""}` : ""}
+        ${windowPages.map((i) => i === page ? `<span class="page-link active" aria-current="page">${i}</span>` : `<a href="${qp(i)}" class="page-link">${i}</a>`).join("")}
+        ${end < totalPages ? `${end < totalPages - 1 ? '<span class="gap" aria-hidden="true">…</span>' : ""}<a href="${qp(totalPages)}" class="page-link">${totalPages}</a>` : ""}
+        ${hasNext ? `<a href="${qp(page + 1)}" class="page-link" rel="next">Next →</a>` : `<span class="page-link disabled">Next →</span>`}
+      </nav>`
+      : "";
+
+  const body = `
+  <section class="list">
+    <div class="container">
+      <header class="list-header">
+        <div class="list-title">
+          <p class="eyebrow">Admin</p>
+          <h1>Manage interactions</h1>
+          <p class="muted">${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}${query ? ` matching "${escapeHtml(query)}"` : ""}. Deleting removes the row from D1 and the file from R2.</p>
+        </div>
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+          <form class="search" method="get" action="/admin/photos" role="search">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" name="q" value="${escapeHtml(query)}" placeholder="Search responses…" aria-label="Search responses" autocomplete="off" />
+            ${query ? `<a class="search-clear" href="/admin/photos" aria-label="Clear search">×</a>` : ""}
+            <button type="submit" class="btn btn-primary btn-sm">Search</button>
+          </form>
+          <form method="POST" action="/admin/logout">
+            <button type="submit" class="btn btn-ghost btn-sm">Sign out</button>
+          </form>
+        </div>
+      </header>
+
+      <div class="grid">${cards}</div>
+
+      ${pagination}
+    </div>
+  </section>
+  `;
+  return layout({
+    title: query ? `"${query}" — Admin` : "Admin — MuseIQ",
+    body,
+  });
+}
+
 export function renderError(message: string): string {
   const body = `
   <section class="error-screen">

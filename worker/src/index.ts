@@ -1,13 +1,38 @@
 import { Hono } from "hono";
-import { getInteractions, getStats, saveInteractionRow } from "./db";
-import { renderHome, renderList, renderError } from "./templates";
-import { decodeDataUrl, normalizeId, nowISO } from "./util";
+import {
+  deleteInteraction,
+  getInteractionById,
+  getInteractions,
+  getStats,
+  saveInteractionRow,
+} from "./db";
+import {
+  renderAdminList,
+  renderAdminLogin,
+  renderError,
+  renderHome,
+  renderList,
+} from "./templates";
+import {
+  decodeDataUrl,
+  normalizeId,
+  nowISO,
+  parseCookie,
+  signSession,
+  timingSafeEqual,
+  verifySession,
+} from "./util";
 
 export type Bindings = {
   DB: D1Database;
   MEDIA: R2Bucket;
   PAGE_SIZE?: string;
+  ADMIN_PASSWORD?: string;
+  ADMIN_SESSION_SECRET?: string;
 };
+
+const ADMIN_COOKIE = "museiq_admin";
+const ADMIN_TTL_SECONDS = 8 * 3600;
 
 type InteractionRequest = {
   id?: string;
@@ -170,6 +195,98 @@ app.post("/api/interactions/list", async (c) => {
   );
 });
 
+// ───────────────────────────── Admin ─────────────────────────────
+
+app.get("/admin", async (c) => {
+  if (await isAdminAuthed(c.env, c.req.raw)) {
+    return c.redirect("/admin/photos", 302);
+  }
+  return c.html(renderAdminLogin());
+});
+
+app.post("/admin/login", async (c) => {
+  const adminPassword = c.env.ADMIN_PASSWORD;
+  if (!adminPassword) {
+    return c.html(
+      renderAdminLogin({
+        error: "ADMIN_PASSWORD is not configured. Run: wrangler secret put ADMIN_PASSWORD",
+      }),
+      500,
+    );
+  }
+  const form = await c.req.formData().catch(() => null);
+  const password = form?.get("password");
+  if (typeof password !== "string" || !timingSafeEqual(password, adminPassword)) {
+    return c.html(renderAdminLogin({ error: "Incorrect password." }), 401);
+  }
+  const secret = sessionSecret(c.env);
+  const token = await signSession(secret, ADMIN_TTL_SECONDS);
+  c.header(
+    "Set-Cookie",
+    `${ADMIN_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=${ADMIN_TTL_SECONDS}`,
+  );
+  return c.redirect("/admin/photos", 302);
+});
+
+app.post("/admin/logout", (c) => {
+  c.header(
+    "Set-Cookie",
+    `${ADMIN_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=0`,
+  );
+  return c.redirect("/admin", 302);
+});
+
+app.get("/admin/photos", async (c) => {
+  if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
+  try {
+    const pageSize = parsePositiveInt(c.env.PAGE_SIZE, 12);
+    const page = Math.max(1, parsePositiveInt(c.req.query("page"), 1));
+    const q = (c.req.query("q") ?? "").trim();
+    const { rows, count } = await getInteractions(c.env.DB, {
+      page,
+      pageSize,
+      query: q,
+    });
+    const totalPages = Math.max(1, Math.ceil(count / pageSize));
+    return c.html(
+      renderAdminList({
+        interactions: rows,
+        page,
+        totalPages,
+        count,
+        query: q,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      }),
+    );
+  } catch (err) {
+    console.error("admin list error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+app.post("/admin/delete/:id", async (c) => {
+  if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
+  const id = c.req.param("id");
+  if (!id) return c.redirect("/admin/photos", 302);
+  try {
+    const row = await getInteractionById(c.env.DB, id);
+    if (row) {
+      // Best-effort R2 delete first; even if it fails we still drop the DB row.
+      try {
+        if (row.image) await c.env.MEDIA.delete(row.image);
+      } catch (e) {
+        console.error("r2 delete failed", row.image, errMsg(e));
+      }
+      await deleteInteraction(c.env.DB, id);
+    }
+    return c.redirect("/admin/photos", 302);
+  } catch (err) {
+    console.error("admin delete error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
 // ───────────────────────────── 404 ─────────────────────────────
 
 app.notFound((c) =>
@@ -198,6 +315,21 @@ function errMsg(e: unknown): string {
   } catch {
     return "unknown error";
   }
+}
+
+function sessionSecret(env: Bindings): string {
+  // Prefer a dedicated secret; fall back to the password so the cookie is still
+  // signed even if only ADMIN_PASSWORD is configured. Set both via:
+  //   wrangler secret put ADMIN_PASSWORD
+  //   wrangler secret put ADMIN_SESSION_SECRET
+  return env.ADMIN_SESSION_SECRET || env.ADMIN_PASSWORD || "";
+}
+
+async function isAdminAuthed(env: Bindings, req: Request): Promise<boolean> {
+  const secret = sessionSecret(env);
+  if (!secret) return false;
+  const token = parseCookie(req.headers.get("cookie"), ADMIN_COOKIE);
+  return verifySession(secret, token);
 }
 
 function guessContentType(key: string): string {

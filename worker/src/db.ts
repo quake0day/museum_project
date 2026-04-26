@@ -89,3 +89,18 @@ export async function saveInteractionRow(
     .bind(row.id, row.response, row.image, row.date)
     .run();
 }
+
+export async function getInteractionById(
+  db: D1Database,
+  id: string,
+): Promise<InteractionRow | null> {
+  const row = await db
+    .prepare("SELECT id, response, image, date FROM interactions WHERE id = ?1")
+    .bind(id)
+    .first<InteractionRow>();
+  return row ?? null;
+}
+
+export async function deleteInteraction(db: D1Database, id: string): Promise<void> {
+  await db.prepare("DELETE FROM interactions WHERE id = ?1").bind(id).run();
+}

@@ -58,3 +58,64 @@ export function truncate(s: string, n: number): string {
   if (!s) return "";
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
+
+// ─── crypto / cookie helpers (admin session) ───
+
+const enc = new TextEncoder();
+
+function bytesToBase64Url(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function hmacSign(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return bytesToBase64Url(sig);
+}
+
+// Constant-time string compare to mitigate timing attacks on token / password checks.
+export function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+export async function signSession(secret: string, ttlSeconds = 8 * 3600): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const payload = `admin:${exp}`;
+  const sig = await hmacSign(secret, payload);
+  return `${exp}.${sig}`;
+}
+
+export async function verifySession(secret: string, token: string | undefined): Promise<boolean> {
+  if (!token) return false;
+  const dot = token.indexOf(".");
+  if (dot <= 0) return false;
+  const expStr = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const exp = parseInt(expStr, 10);
+  if (!Number.isFinite(exp) || exp * 1000 < Date.now()) return false;
+  const expected = await hmacSign(secret, `admin:${exp}`);
+  return timingSafeEqual(expected, sig);
+}
+
+export function parseCookie(header: string | null | undefined, name: string): string | undefined {
+  if (!header) return undefined;
+  const parts = header.split(/;\s*/);
+  for (const p of parts) {
+    const eq = p.indexOf("=");
+    if (eq < 0) continue;
+    if (p.slice(0, eq) === name) return decodeURIComponent(p.slice(eq + 1));
+  }
+  return undefined;
+}
