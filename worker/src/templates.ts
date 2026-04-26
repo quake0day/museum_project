@@ -7,10 +7,26 @@ import { kindLabel, kindRank } from "./wiki/encyclopedia";
 import type { GraphData } from "./wiki/graph";
 import { renderMarkdown } from "./wiki/render";
 
-function layout(opts: { title: string; active?: string; body: string }): string {
+function layout(opts: {
+  title: string;
+  active?: string;
+  body: string;
+  currentUser?: string | null;
+  isSignedIn?: boolean;
+}): string {
   const active = opts.active ?? "";
   const navLink = (href: string, label: string, key: string) =>
     `<a href="${href}"${active === key ? ' class="active"' : ""}>${label}</a>`;
+  // The user pill is rendered server-side when known, otherwise filled in by
+  // main.js on page load via /api/me — this lets every render function stay
+  // simple while still showing the right state on every page.
+  const wikiHref = opts.currentUser ? `/wiki/${encodeURIComponent(opts.currentUser)}/index` : "/wiki/default/index";
+  const userPill = opts.isSignedIn && opts.currentUser
+    ? `<form method="POST" action="/logout" class="user-pill" title="Sign out" data-user-pill>
+        <span class="user-pill-name">@${escapeHtml(opts.currentUser)}</span>
+        <button type="submit" class="user-pill-out" aria-label="Sign out">↩</button>
+      </form>`
+    : `<span class="user-pill-slot" data-user-pill></span>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -52,14 +68,15 @@ function layout(opts: { title: string; active?: string; body: string }): string 
       </a>
       <nav class="nav" aria-label="Primary">
         ${navLink("/", "Home", "home")}
-        ${navLink("/wiki/default/index", "My Wiki", "wiki")}
+        ${navLink(wikiHref, "My Wiki", "wiki")}
         ${navLink("/me/timeline", "Timeline", "timeline")}
         ${navLink("/me/map", "Map", "map")}
         ${navLink("/me/graph", "Graph", "graph")}
         ${navLink("/me/quests", "Quests", "quests")}
         ${navLink("/interactions/view", "Captures", "list")}
       </nav>
-      <a class="nav-icon" href="/wiki/default/_search" title="Search the wiki" aria-label="Search">
+      ${userPill}
+      <a class="nav-icon" href="${opts.currentUser ? `/wiki/${encodeURIComponent(opts.currentUser)}/_search` : "/wiki/default/_search"}" title="Search the wiki" aria-label="Search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </a>
       <button class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
@@ -93,8 +110,8 @@ function layout(opts: { title: string; active?: string; body: string }): string 
 </html>`;
 }
 
-export function renderStudentHome(opts: { user: string; data: DashboardData }): string {
-  const { user, data } = opts;
+export function renderStudentHome(opts: { user: string; data: DashboardData; isSignedIn?: boolean }): string {
+  const { user, data, isSignedIn } = opts;
   const { totals, recent, inProgress, earnedRecent, nextAdventure } = data;
 
   const hour = new Date().getHours();
@@ -297,7 +314,72 @@ export function renderStudentHome(opts: { user: string; data: DashboardData }): 
     .dash-explore strong { font-size: 1rem; }
     .dash-explore small { font-size: .82rem; color: var(--ink-muted); line-height: 1.4; }
   </style>`;
-  return layout({ title: "My Museum Wiki — MuseIQ", active: "home", body });
+  return layout({ title: "My Museum Wiki — MuseIQ", active: "home", body, currentUser: user, isSignedIn });
+}
+
+export function renderLogin(opts: {
+  next: string;
+  error: string | null;
+  currentUser: string;
+  isSignedIn: boolean;
+}): string {
+  const { next, error, currentUser, isSignedIn } = opts;
+  const safeNext = next.startsWith("/") ? next : "/";
+  const body = `
+  <section class="login-screen">
+    <div class="container login-inner">
+      <p class="eyebrow">Welcome to MuseIQ</p>
+      <h1>Who are you?</h1>
+      <p class="muted">Type your name to enter your personal museum wiki. No password needed — your name is your space.</p>
+      ${error ? `<p class="login-error">${escapeHtml(error)}</p>` : ""}
+      <form method="POST" action="/login" class="login-form">
+        <input type="hidden" name="next" value="${escapeHtml(safeNext)}" />
+        <label for="login-name" class="login-label">Your name</label>
+        <input id="login-name" type="text" name="name" placeholder="e.g. Chen" autofocus required maxlength="32" autocomplete="username" />
+        <button class="btn btn-primary" type="submit">Enter →</button>
+      </form>
+      <p class="muted login-hint">Names are case-insensitive and converted to a slug. "Si Chen" and "Chen" are different spaces; "Chen" and "chen" are the same.</p>
+    </div>
+  </section>
+  <style>
+    .login-screen { padding: 4rem 1.5rem; }
+    .login-inner { max-width: 460px; margin: 0 auto; text-align: center; }
+    .login-inner h1 { font-family: 'Fraunces', serif; font-size: clamp(1.8rem, 4vw, 2.6rem); margin: .5rem 0 .75rem; }
+    .login-form {
+      display: flex;
+      flex-direction: column;
+      gap: .75rem;
+      max-width: 320px;
+      margin: 1.5rem auto 1rem;
+    }
+    .login-label { font-size: .82rem; color: var(--ink-muted); text-align: left; letter-spacing: 0.02em; }
+    .login-form input {
+      padding: .8rem 1rem;
+      font-size: 1.05rem;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-strong);
+      background: var(--bg-elev);
+      font-family: inherit;
+      color: var(--ink);
+      text-align: center;
+    }
+    .login-form input:focus {
+      outline: 3px solid var(--ring);
+      outline-offset: 0;
+      border-color: var(--primary);
+    }
+    .login-form button { padding: .85rem; font-size: 1rem; }
+    .login-error {
+      padding: .75rem 1rem;
+      background: #FEE2E2;
+      border: 1px solid #FCA5A5;
+      border-radius: var(--radius-sm);
+      color: #991B1B;
+      font-size: .9rem;
+    }
+    .login-hint { font-size: .82rem; max-width: 360px; margin: 1rem auto 0; }
+  </style>`;
+  return layout({ title: "Sign in — MuseIQ", body, currentUser, isSignedIn });
 }
 
 const DOMAIN_EMOJI: Record<string, string> = {

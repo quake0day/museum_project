@@ -26,6 +26,33 @@
     applyTheme(e.matches ? 'dark' : 'light');
   });
 
+  // ───────────── User pill ─────────────
+  // Layout renders the pill server-side when the route already knows the
+  // user; otherwise it leaves a slot for us to fill on page load.
+  const userPillSlot = document.querySelector('.user-pill-slot[data-user-pill]');
+  if (userPillSlot) {
+    fetch('/api/me', { credentials: 'same-origin' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (!d) return;
+        if (d.signedIn && d.user) {
+          userPillSlot.outerHTML = `
+            <form method="POST" action="/logout" class="user-pill" title="Sign out" data-user-pill>
+              <span class="user-pill-name">@${escapeText(d.user)}</span>
+              <button type="submit" class="user-pill-out" aria-label="Sign out">↩</button>
+            </form>`;
+        } else {
+          userPillSlot.outerHTML = `<a class="user-pill user-pill-anon" href="/login" data-user-pill>Sign in</a>`;
+        }
+      })
+      .catch(() => {});
+  }
+  function escapeText(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[c]);
+  }
+
   // ───────────── Lightbox ─────────────
   // Triggers: any element with [data-lightbox-trigger]. Required attrs:
   //   data-src       — image URL

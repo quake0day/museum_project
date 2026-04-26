@@ -109,6 +109,62 @@ export async function verifySession(secret: string, token: string | undefined): 
   return timingSafeEqual(expected, sig);
 }
 
+// ─── user identity (name-only login) ───
+//
+// Slugify a free-text name into a stable user_id. Lowercase ASCII letters,
+// digits, and hyphens; max 32 chars. "Si Chen" → "si-chen", "Chen" → "chen".
+export function slugifyUserName(s: string): string | null {
+  if (typeof s !== "string") return null;
+  const slug = s
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+  return slug.length >= 1 && slug.length <= 32 ? slug : null;
+}
+
+// Sign/verify a user cookie. Format: `<user_id>.<exp>.<sig>` with the
+// signature over `user:<user_id>:<exp>` so swapping the user_id invalidates
+// the token.
+async function hmacForUser(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return bytesToBase64Url(sig);
+}
+
+export async function signUserToken(
+  secret: string,
+  userId: string,
+  ttlSeconds = 30 * 24 * 3600,
+): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const sig = await hmacForUser(secret, `user:${userId}:${exp}`);
+  return `${userId}.${exp}.${sig}`;
+}
+
+export async function verifyUserToken(
+  secret: string,
+  token: string | undefined,
+): Promise<string | null> {
+  if (!token) return null;
+  const dot1 = token.indexOf(".");
+  if (dot1 <= 0) return null;
+  const dot2 = token.indexOf(".", dot1 + 1);
+  if (dot2 <= dot1) return null;
+  const user = token.slice(0, dot1);
+  const expStr = token.slice(dot1 + 1, dot2);
+  const sig = token.slice(dot2 + 1);
+  if (!/^[a-z0-9-]+$/.test(user)) return null;
+  const exp = parseInt(expStr, 10);
+  if (!Number.isFinite(exp) || exp * 1000 < Date.now()) return null;
+  const expected = await hmacForUser(secret, `user:${user}:${exp}`);
+  return timingSafeEqual(expected, sig) ? user : null;
+}
+
 export function parseCookie(header: string | null | undefined, name: string): string | undefined {
   if (!header) return undefined;
   const parts = header.split(/;\s*/);

@@ -26,6 +26,7 @@ import {
   renderStudentHome,
   renderEncyclopediaIndex,
   renderKnowledgeGraph,
+  renderLogin,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -33,8 +34,11 @@ import {
   nowISO,
   parseCookie,
   signSession,
+  signUserToken,
+  slugifyUserName,
   timingSafeEqual,
   verifySession,
+  verifyUserToken,
 } from "./util";
 import { getAiProvider } from "./ai";
 import { ingestExhibit } from "./wiki/ingest";
@@ -64,6 +68,14 @@ export type Bindings = {
 
 const ADMIN_COOKIE = "museiq_admin";
 const ADMIN_TTL_SECONDS = 8 * 3600;
+const USER_COOKIE = "museiq_user";
+const USER_TTL_SECONDS = 30 * 24 * 3600;
+
+// Hono context vars for the user identity, set by the auth middleware below.
+type Variables = {
+  currentUser: string;     // resolved per request — cookie if signed-in, else default
+  isSignedIn: boolean;     // distinguishes "viewer = default" from "actually logged in"
+};
 
 type InteractionRequest = {
   id?: string;
@@ -72,15 +84,34 @@ type InteractionRequest = {
   date?: string;
 };
 
-const app = new Hono<{ Bindings: Bindings }>();
+const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+// Resolve the current user once per request from the museiq_user cookie.
+// Falls back to DEFAULT_USER_ID so anonymous browsing still sees content.
+app.use("*", async (c, next) => {
+  const secret = c.env.ADMIN_SESSION_SECRET || c.env.ADMIN_PASSWORD || "";
+  let user = defaultUserId(c.env);
+  let signedIn = false;
+  if (secret) {
+    const token = parseCookie(c.req.raw.headers.get("cookie"), USER_COOKIE);
+    const verified = await verifyUserToken(secret, token);
+    if (verified) {
+      user = verified;
+      signedIn = true;
+    }
+  }
+  c.set("currentUser", user);
+  c.set("isSignedIn", signedIn);
+  await next();
+});
 
 // ───────────────────────────── Pages ─────────────────────────────
 
 app.get("/", async (c) => {
   try {
-    const user = defaultUserId(c.env);
+    const user = c.var.currentUser;
     const data = await buildDashboard(c.env.DB, user);
-    return c.html(renderStudentHome({ user, data }));
+    return c.html(renderStudentHome({ user, data, isSignedIn: c.var.isSignedIn }));
   } catch (err) {
     console.error("home error", err);
     return c.html(renderError(errMsg(err)), 500);
@@ -99,6 +130,46 @@ app.get("/about", async (c) => {
 
 // /me alias to the student home
 app.get("/me", (c) => c.redirect("/", 302));
+
+// ───────────────────────────── Login ─────────────────────────────
+
+app.get("/login", (c) => {
+  const next = c.req.query("next") ?? "/";
+  return c.html(renderLogin({ next, error: null, currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn }));
+});
+
+app.post("/login", async (c) => {
+  const secret = c.env.ADMIN_SESSION_SECRET || c.env.ADMIN_PASSWORD || "";
+  if (!secret) return c.html(renderError("Auth secret not configured"), 500);
+  const form = await c.req.formData().catch(() => null);
+  const nameRaw = form?.get("name");
+  const nextRaw = form?.get("next");
+  const name = typeof nameRaw === "string" ? nameRaw : "";
+  const slug = slugifyUserName(name);
+  if (!slug) {
+    return c.html(renderLogin({
+      next: typeof nextRaw === "string" ? nextRaw : "/",
+      error: "Use letters, numbers, or hyphens (1–32 characters).",
+      currentUser: c.var.currentUser,
+      isSignedIn: c.var.isSignedIn,
+    }), 400);
+  }
+  const token = await signUserToken(secret, slug, USER_TTL_SECONDS);
+  c.header(
+    "Set-Cookie",
+    `${USER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${USER_TTL_SECONDS}`,
+  );
+  const next = typeof nextRaw === "string" && nextRaw.startsWith("/") ? nextRaw : "/";
+  return c.redirect(next, 303);
+});
+
+app.post("/logout", (c) => {
+  c.header(
+    "Set-Cookie",
+    `${USER_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+  );
+  return c.redirect("/login", 303);
+});
 
 app.get("/interactions/view", async (c) => {
   try {
@@ -149,11 +220,14 @@ app.get("/media/*", async (c) => {
 
 // ───────────────────────────── API ─────────────────────────────
 
+app.get("/api/me", (c) =>
+  c.json({ user: c.var.currentUser, signedIn: c.var.isSignedIn })
+);
+
 app.get("/api/health", async (c) => {
   try {
-    const userId = defaultUserId(c.env);
-    const wiki = await wikiStats(c.env.DB, userId);
-    return c.json({ status: "ok", wiki });
+    const wiki = await wikiStats(c.env.DB, c.var.currentUser);
+    return c.json({ status: "ok", wiki, user: c.var.currentUser, signedIn: c.var.isSignedIn });
   } catch (e) {
     return c.json({ status: "ok" });
   }
@@ -537,7 +611,7 @@ app.get("/wiki/:user/*", async (c) => {
 // ───────────────────────────── /me views (timeline, map) ───────────────
 
 app.get("/me/timeline", async (c) => {
-  const user = defaultUserId(c.env);
+  const user = c.var.currentUser;
   try {
     const points = await getTimelinePoints(c.env.DB, user);
     return c.html(renderTimeline({ user, points }));
@@ -548,7 +622,7 @@ app.get("/me/timeline", async (c) => {
 });
 
 app.get("/me/graph", async (c) => {
-  const user = defaultUserId(c.env);
+  const user = c.var.currentUser;
   try {
     const data = await buildKnowledgeGraph(c.env.DB, user, { maxNodes: 500 });
     return c.html(renderKnowledgeGraph({ user, data }));
@@ -559,7 +633,7 @@ app.get("/me/graph", async (c) => {
 });
 
 app.get("/me/quests", async (c) => {
-  const user = defaultUserId(c.env);
+  const user = c.var.currentUser;
   try {
     const quests = await evaluateQuests(c.env.DB, user);
     return c.html(renderQuests({ user, quests }));
@@ -570,7 +644,7 @@ app.get("/me/quests", async (c) => {
 });
 
 app.get("/me/map", async (c) => {
-  const user = defaultUserId(c.env);
+  const user = c.var.currentUser;
   try {
     const points = await getMapPoints(c.env.DB, user);
     return c.html(renderMap({ user, points }));
@@ -591,7 +665,7 @@ app.post("/admin/ingest/:id", async (c) => {
   }
   try {
     await runSingleIngest(c.env, id);
-    return c.redirect(`/wiki/${encodeURIComponent(defaultUserId(c.env))}/exhibits/${encodeURIComponent(id)}`, 302);
+    return c.redirect(`/wiki/${encodeURIComponent(c.var.currentUser)}/exhibits/${encodeURIComponent(id)}`, 302);
   } catch (err) {
     console.error("admin ingest error", err);
     // Make sure the row never gets stuck at 'running' on an unhandled throw.
