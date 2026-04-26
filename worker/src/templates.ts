@@ -1,10 +1,12 @@
 import type { InteractionRow, Stats } from "./db";
-import { escapeHtml, formatDate } from "./util";
+import { escapeHtml, formatDate, detectLang } from "./util";
 import type { WikiPageRow, WikiSearchHit, InboundExhibit, CoOccurrence } from "./wiki/db";
 import type { DashboardData } from "./wiki/dashboard";
 import type { EncyclopediaData } from "./wiki/encyclopedia";
 import { kindLabel, kindRank } from "./wiki/encyclopedia";
 import type { GraphData } from "./wiki/graph";
+import type { Lang } from "./i18n";
+import { t as ti, tx } from "./i18n";
 import { renderMarkdown } from "./wiki/render";
 
 function layout(opts: {
@@ -13,7 +15,9 @@ function layout(opts: {
   body: string;
   currentUser?: string | null;
   isSignedIn?: boolean;
+  lang?: Lang;
 }): string {
+  const lang: Lang = opts.lang ?? "en";
   const active = opts.active ?? "";
   const navLink = (href: string, label: string, key: string) =>
     `<a href="${href}"${active === key ? ' class="active"' : ""}>${label}</a>`;
@@ -29,7 +33,7 @@ function layout(opts: {
     : `<span class="user-pill-slot" data-user-pill></span>`;
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${lang}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -46,6 +50,16 @@ function layout(opts: {
       try {
         var t = localStorage.getItem('museiq-theme') || 'light';
         document.documentElement.setAttribute('data-theme', t);
+      } catch (_) {}
+    })();
+    (function () {
+      // Sync language with the museiq_lang cookie before paint so the
+      // [data-lang] CSS rule hides the right elements from frame 1.
+      try {
+        var m = document.cookie.match(/(?:^|;\s*)museiq_lang=([^;]+)/);
+        var lang = m ? decodeURIComponent(m[1]) : 'en';
+        if (lang !== 'en' && lang !== 'zh') lang = 'en';
+        document.documentElement.setAttribute('lang', lang);
       } catch (_) {}
     })();
   </script>
@@ -67,16 +81,19 @@ function layout(opts: {
         </span>
       </a>
       <nav class="nav" aria-label="Primary">
-        ${navLink("/", "Home", "home")}
-        ${navLink(wikiHref, "My Wiki", "wiki")}
-        ${navLink("/me/timeline", "Timeline", "timeline")}
-        ${navLink("/me/map", "Map", "map")}
-        ${navLink("/me/graph", "Graph", "graph")}
-        ${navLink("/me/quests", "Quests", "quests")}
-        ${navLink("/interactions/view", "Captures", "list")}
+        ${navLink("/", ti("nav.home"), "home")}
+        ${navLink(wikiHref, ti("nav.wiki"), "wiki")}
+        ${navLink("/me/timeline", ti("nav.timeline"), "timeline")}
+        ${navLink("/me/map", ti("nav.map"), "map")}
+        ${navLink("/me/graph", ti("nav.graph"), "graph")}
+        ${navLink("/me/quests", ti("nav.quests"), "quests")}
+        ${navLink("/interactions/view", ti("nav.captures"), "list")}
       </nav>
       ${userPill}
-      <a class="nav-icon" href="${opts.currentUser ? `/wiki/${encodeURIComponent(opts.currentUser)}/_search` : "/wiki/default/_search"}" title="Search the wiki" aria-label="Search">
+      <button class="lang-toggle" type="button" data-lang-toggle title="${tx("lang.tooltip." + lang as any, lang)}" aria-label="Toggle language">
+        <span data-lang="en">中文</span><span data-lang="zh">EN</span>
+      </button>
+      <a class="nav-icon" href="${opts.currentUser ? `/wiki/${encodeURIComponent(opts.currentUser)}/_search` : "/wiki/chen/_search"}" title="${tx("nav.search", lang)}" aria-label="${tx("nav.search", lang)}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </a>
       <button class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
@@ -110,12 +127,13 @@ function layout(opts: {
 </html>`;
 }
 
-export function renderStudentHome(opts: { user: string; data: DashboardData; isSignedIn?: boolean }): string {
+export function renderStudentHome(opts: { user: string; data: DashboardData; isSignedIn?: boolean; lang?: Lang }): string {
   const { user, data, isSignedIn } = opts;
+  const lang: Lang = opts.lang ?? "en";
   const { totals, recent, inProgress, earnedRecent, nextAdventure } = data;
 
   const hour = new Date().getHours();
-  const greeting = hour < 5 ? "Still up?" : hour < 12 ? "Good morning" : hour < 18 ? "Welcome back" : "Good evening";
+  const greetingKey = hour < 5 ? "home.greeting.night" : hour < 12 ? "home.greeting.morning" : hour < 18 ? "home.greeting.afternoon" : "home.greeting.evening";
 
   const recentCard = (r: typeof recent[number]) => {
     const src = "/media/" + r.image.split("/").map(encodeURIComponent).join("/");
@@ -150,16 +168,16 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
   <section class="dash-hero">
     <div class="container dash-hero-inner">
       <div>
-        <p class="eyebrow">${escapeHtml(greeting)}, Junior Curator</p>
-        <h1>My Museum Wiki</h1>
-        <p class="lede">Turn every museum visit into a personal learning wiki.</p>
+        <p class="eyebrow">${ti(greetingKey)}, ${ti("home.subtitle")}</p>
+        <h1>${ti("home.title")}</h1>
+        <p class="lede">${ti("home.tagline")}</p>
       </div>
       <div class="dash-stats" aria-label="Collection at a glance">
-        <div class="dash-stat"><dt>Exhibits</dt><dd>${totals.exhibits.toLocaleString()}</dd></div>
-        <div class="dash-stat"><dt>Concepts</dt><dd>${totals.concepts.toLocaleString()}</dd></div>
-        <div class="dash-stat"><dt>Places</dt><dd>${totals.places.toLocaleString()}</dd></div>
-        <div class="dash-stat"><dt>Periods</dt><dd>${totals.periods.toLocaleString()}</dd></div>
-        ${totals.pending > 0 ? `<div class="dash-stat dash-stat-pending"><dt>Pending AI</dt><dd>${totals.pending.toLocaleString()}</dd></div>` : ""}
+        <div class="dash-stat"><dt>${ti("home.stat.exhibits")}</dt><dd>${totals.exhibits.toLocaleString()}</dd></div>
+        <div class="dash-stat"><dt>${ti("home.stat.concepts")}</dt><dd>${totals.concepts.toLocaleString()}</dd></div>
+        <div class="dash-stat"><dt>${ti("home.stat.places")}</dt><dd>${totals.places.toLocaleString()}</dd></div>
+        <div class="dash-stat"><dt>${ti("home.stat.periods")}</dt><dd>${totals.periods.toLocaleString()}</dd></div>
+        ${totals.pending > 0 ? `<div class="dash-stat dash-stat-pending"><dt>${ti("home.stat.pending")}</dt><dd>${totals.pending.toLocaleString()}</dd></div>` : ""}
       </div>
     </div>
   </section>
@@ -169,7 +187,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
       <a href="${nextAdventure.href}" class="dash-next">
         <div class="dash-next-emoji" aria-hidden="true">${nextAdventure.emoji}</div>
         <div class="dash-next-body">
-          <p class="eyebrow">Next adventure</p>
+          <p class="eyebrow">${ti("home.next")}</p>
           <h2>${escapeHtml(nextAdventure.title)}</h2>
           <p>${escapeHtml(nextAdventure.hint)}</p>
         </div>
@@ -182,8 +200,8 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
   <section class="dash-block">
     <div class="container">
       <header class="dash-block-head">
-        <h2>Recently captured</h2>
-        <a href="/interactions/view" class="muted">all captures →</a>
+        <h2>${ti("home.recent")}</h2>
+        <a href="/interactions/view" class="muted">${ti("home.allcaptures")}</a>
       </header>
       <div class="dash-recent-grid">
         ${recent.slice(0, 4).map(recentCard).join("")}
@@ -195,8 +213,8 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
   <section class="dash-block">
     <div class="container">
       <header class="dash-block-head">
-        <h2>Quests in progress</h2>
-        <a href="/me/quests" class="muted">all quests →</a>
+        <h2>${ti("home.questsActive")}</h2>
+        <a href="/me/quests" class="muted">${ti("home.allquests")}</a>
       </header>
       <div class="dash-quest-list">
         ${inProgress.map(questBar).join("")}
@@ -208,8 +226,8 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
   <section class="dash-block">
     <div class="container">
       <header class="dash-block-head">
-        <h2>Badges earned</h2>
-        <a href="/me/quests" class="muted">all badges →</a>
+        <h2>${ti("home.badges")}</h2>
+        <a href="/me/quests" class="muted">${ti("home.allbadges")}</a>
       </header>
       <div class="dash-badges">
         ${earnedRecent.map((q) => `<a class="dash-badge" href="/me/quests" title="${escapeHtml(q.description)}">
@@ -225,37 +243,37 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
 
   <section class="dash-block">
     <div class="container">
-      <header class="dash-block-head"><h2>Explore your wiki</h2></header>
+      <header class="dash-block-head"><h2>${ti("home.explore")}</h2></header>
       <div class="dash-explore-grid">
         <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/index">
           <span class="dash-explore-emoji">📚</span>
-          <strong>All pages</strong>
-          <small>Browse every exhibit, concept, place, period, person, and theme.</small>
+          <strong>${ti("home.explore.all")}</strong>
+          <small>${ti("home.explore.allDesc")}</small>
         </a>
         <a class="dash-explore" href="/me/timeline">
           <span class="dash-explore-emoji">⏳</span>
-          <strong>Timeline</strong>
-          <small>See your captures along an axis from prehistory to today.</small>
+          <strong>${ti("home.explore.timeline")}</strong>
+          <small>${ti("home.explore.timelineDesc")}</small>
         </a>
         <a class="dash-explore" href="/me/map">
           <span class="dash-explore-emoji">🗺️</span>
-          <strong>Map</strong>
-          <small>Where in the world your exhibits come from.</small>
+          <strong>${ti("home.explore.map")}</strong>
+          <small>${ti("home.explore.mapDesc")}</small>
         </a>
         <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/_search">
           <span class="dash-explore-emoji">🔍</span>
-          <strong>Search</strong>
-          <small>Find any page in your wiki by keyword.</small>
+          <strong>${ti("home.explore.search")}</strong>
+          <small>${ti("home.explore.searchDesc")}</small>
         </a>
         <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/_ask">
           <span class="dash-explore-emoji">💬</span>
-          <strong>Ask the wiki</strong>
-          <small>Curious about something? The wiki answers with citations.</small>
+          <strong>${ti("home.explore.ask")}</strong>
+          <small>${ti("home.explore.askDesc")}</small>
         </a>
         <a class="dash-explore" href="/me/quests">
           <span class="dash-explore-emoji">🏅</span>
-          <strong>Quests</strong>
-          <small>Missions and badges to guide your next museum visit.</small>
+          <strong>${ti("home.explore.quests")}</strong>
+          <small>${ti("home.explore.questsDesc")}</small>
         </a>
       </div>
     </div>
@@ -314,7 +332,10 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
     .dash-explore strong { font-size: 1rem; }
     .dash-explore small { font-size: .82rem; color: var(--ink-muted); line-height: 1.4; }
   </style>`;
-  return layout({ title: "My Museum Wiki — MuseIQ", active: "home", body, currentUser: user, isSignedIn });
+  return layout({
+    title: tx("home.title", lang) + " — MuseIQ",
+    active: "home", body, currentUser: user, isSignedIn, lang,
+  });
 }
 
 export function renderLogin(opts: {
@@ -545,9 +566,14 @@ export function renderList(data: {
           // When the wiki page exists, the whole card becomes a link to it.
           // Otherwise the lightbox-trigger keeps its zoom-on-click behavior.
           const domainCls = domain ? `domain-${escapeHtml(domain)}` : "";
+          // Detect content language from whichever text we have. Cards
+          // tagged 'mixed' or 'unknown' are always shown; pure 'en' or
+          // 'zh' cards get filtered by the active UI lang via CSS.
+          const cardLang = detectLang((it.response ?? "") + " " + (it.child_summary ?? ""));
+          const cardLangAttr = (cardLang === "en" || cardLang === "zh") ? ` data-lang="${cardLang}"` : "";
           const cardOpen = wikiHref
-            ? `<a class="card card-link ${domainCls}" href="${wikiHref}">`
-            : `<article class="card ${domainCls}" data-lightbox-trigger data-src="${src}" data-caption="${escapeHtml(it.response ?? "")}">`;
+            ? `<a class="card card-link ${domainCls}" href="${wikiHref}"${cardLangAttr}>`
+            : `<article class="card ${domainCls}" data-lightbox-trigger data-src="${src}" data-caption="${escapeHtml(it.response ?? "")}"${cardLangAttr}>`;
           const cardClose = wikiHref ? `</a>` : `</article>`;
           return `
       ${cardOpen}
@@ -970,6 +996,10 @@ export function renderWikiPage(opts: {
   const md = stripFrontmatter(page.body);
   const { quote: heroQuote, body: trimmedBody } = extractLeadingQuote(md);
   const html = renderMarkdown(stripLeadingHeading(trimmedBody, page.title));
+  // Detect content language from the body + title so [data-lang] CSS can
+  // hide pages that don't match the active UI lang.
+  const pageLang = detectLang(page.title + " " + md);
+  const pageLangAttr = (pageLang === "en" || pageLang === "zh") ? ` data-lang="${pageLang}"` : "";
 
   // Hero chips — strict diet: only the primary domain, plus a single
   // place/period summary line. No secondary-domain rainbow.
@@ -1147,7 +1177,7 @@ export function renderWikiPage(opts: {
       </div>
     </div>
     <div class="container wiki-container">
-      <article class="wiki-body">
+      <article class="wiki-body"${pageLangAttr}>
         ${html}
       </article>
       ${placeMapHtml}

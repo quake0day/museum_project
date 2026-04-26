@@ -109,6 +109,44 @@ export async function verifySession(secret: string, token: string | undefined): 
   return timingSafeEqual(expected, sig);
 }
 
+// ─── language detection (CJK heuristic) ───
+//
+// Returns 'en' if mostly Latin letters, 'zh' if mostly CJK characters,
+// 'mixed' when both meaningfully present, 'unknown' for empty/symbols-only.
+// This drives the data-lang attribute on user-generated content so the
+// per-page lang toggle can hide non-matching items via CSS.
+export type LangTag = "en" | "zh" | "mixed" | "unknown";
+
+export function detectLang(s: string | null | undefined): LangTag {
+  if (!s) return "unknown";
+  const text = String(s);
+  if (!text.trim()) return "unknown";
+  let cjk = 0;
+  let latin = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    if (cp === undefined) continue;
+    // CJK Unified Ideographs + Extension A + B + Japanese kana ranges.
+    if (
+      (cp >= 0x4e00 && cp <= 0x9fff) ||
+      (cp >= 0x3400 && cp <= 0x4dbf) ||
+      (cp >= 0x20000 && cp <= 0x2a6df) ||
+      (cp >= 0x3040 && cp <= 0x30ff) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) // Hangul too — counts as non-Latin
+    ) {
+      cjk++;
+    } else if ((cp >= 0x41 && cp <= 0x5a) || (cp >= 0x61 && cp <= 0x7a)) {
+      latin++;
+    }
+  }
+  const total = cjk + latin;
+  if (total === 0) return "unknown";
+  const cjkRatio = cjk / total;
+  if (cjkRatio > 0.5) return "zh";
+  if (cjkRatio < 0.1) return "en";
+  return "mixed";
+}
+
 // ─── user identity (name-only login) ───
 //
 // Slugify a free-text name into a stable user_id. Lowercase ASCII letters,

@@ -40,6 +40,8 @@ import {
   verifySession,
   verifyUserToken,
 } from "./util";
+import type { Lang } from "./i18n";
+import { SUPPORTED as LANGS, DEFAULT_LANG } from "./i18n";
 import { getAiProvider } from "./ai";
 import { ingestExhibit } from "./wiki/ingest";
 import { getWikiPage, getInboundLinks, getInboundExhibits, getCoOccurringEntities, wikiStats, searchWiki } from "./wiki/db";
@@ -71,10 +73,14 @@ const ADMIN_TTL_SECONDS = 8 * 3600;
 const USER_COOKIE = "museiq_user";
 const USER_TTL_SECONDS = 30 * 24 * 3600;
 
+const LANG_COOKIE = "museiq_lang";
+const LANG_TTL_SECONDS = 365 * 24 * 3600;
+
 // Hono context vars for the user identity, set by the auth middleware below.
 type Variables = {
   currentUser: string;     // resolved per request — cookie if signed-in, else default
   isSignedIn: boolean;     // distinguishes "viewer = default" from "actually logged in"
+  lang: Lang;              // user's preferred UI language (en | zh)
 };
 
 type InteractionRequest = {
@@ -102,7 +108,30 @@ app.use("*", async (c, next) => {
   }
   c.set("currentUser", user);
   c.set("isSignedIn", signedIn);
+
+  // Language preference: cookie → fallback to default. The cookie is plain
+  // (not signed) since lang choice isn't security-sensitive.
+  const langRaw = parseCookie(c.req.raw.headers.get("cookie"), LANG_COOKIE);
+  const lang: Lang = (langRaw && (LANGS as readonly string[]).includes(langRaw))
+    ? (langRaw as Lang)
+    : DEFAULT_LANG;
+  c.set("lang", lang);
   await next();
+});
+
+// POST /api/lang { lang } — set the lang cookie. Used by the header toggle.
+app.post("/api/lang", async (c) => {
+  let body: { lang?: string } = {};
+  try { body = await c.req.json(); } catch { /* allow empty */ }
+  const lang = body.lang;
+  if (typeof lang !== "string" || !(LANGS as readonly string[]).includes(lang)) {
+    return c.json({ error: "lang must be one of " + LANGS.join(",") }, 400);
+  }
+  c.header(
+    "Set-Cookie",
+    `${LANG_COOKIE}=${encodeURIComponent(lang)}; Secure; SameSite=Lax; Path=/; Max-Age=${LANG_TTL_SECONDS}`,
+  );
+  return c.json({ ok: true, lang });
 });
 
 // ───────────────────────────── Pages ─────────────────────────────
@@ -111,7 +140,9 @@ app.get("/", async (c) => {
   try {
     const user = c.var.currentUser;
     const data = await buildDashboard(c.env.DB, user);
-    return c.html(renderStudentHome({ user, data, isSignedIn: c.var.isSignedIn }));
+    return c.html(renderStudentHome({
+      user, data, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+    }));
   } catch (err) {
     console.error("home error", err);
     return c.html(renderError(errMsg(err)), 500);

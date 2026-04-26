@@ -26,6 +26,25 @@
     applyTheme(e.matches ? 'dark' : 'light');
   });
 
+  // ───────────── Language toggle ─────────────
+  // Flips <html lang> instantly + persists via /api/lang cookie. CSS hides
+  // mismatched-language elements via [data-lang] selectors.
+  const langBtn = document.querySelector('[data-lang-toggle]');
+  if (langBtn) {
+    langBtn.addEventListener('click', () => {
+      const html = document.documentElement;
+      const next = html.getAttribute('lang') === 'zh' ? 'en' : 'zh';
+      html.setAttribute('lang', next);
+      // fire-and-forget: server cookie persists the choice for next visit
+      fetch('/api/lang', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ lang: next }),
+      }).catch(() => {});
+    });
+  }
+
   // ───────────── User pill ─────────────
   // Layout renders the pill server-side when the route already knows the
   // user; otherwise it leaves a slot for us to fill on page load.
