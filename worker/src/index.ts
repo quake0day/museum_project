@@ -25,6 +25,7 @@ import {
   renderQuiz,
   renderStudentHome,
   renderEncyclopediaIndex,
+  renderKnowledgeGraph,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -37,9 +38,10 @@ import {
 } from "./util";
 import { getAiProvider } from "./ai";
 import { ingestExhibit } from "./wiki/ingest";
-import { getWikiPage, getInboundLinks, getInboundExhibits, wikiStats, searchWiki } from "./wiki/db";
+import { getWikiPage, getInboundLinks, getInboundExhibits, getCoOccurringEntities, wikiStats, searchWiki } from "./wiki/db";
 import { buildIndexPage, buildLogPage } from "./wiki/index_render";
 import { buildEncyclopedia } from "./wiki/encyclopedia";
+import { buildKnowledgeGraph } from "./wiki/graph";
 import { runLint } from "./wiki/lint";
 import { getMapPoints, getTimelinePoints } from "./wiki/views";
 import { evaluateQuests } from "./wiki/quests";
@@ -515,16 +517,17 @@ app.get("/wiki/:user/*", async (c) => {
       const row = await getInteractionById(c.env.DB, exhibitId);
       if (row) imageSrc = "/media/" + row.image.split("/").map(encodeURIComponent).join("/");
     }
-    // Inbound links + photos — only useful on entity pages where many
-    // exhibits cite back.
+    // Inbound links + photos + 2-hop co-occurring entities — only useful
+    // on entity pages.
     const isEntity = page.kind !== "exhibit" && page.kind !== "exhibit_unknown";
-    const [inbound, photos] = isEntity
+    const [inbound, photos, related] = isEntity
       ? await Promise.all([
           getInboundLinks(c.env.DB, user, path, 30),
           getInboundExhibits(c.env.DB, user, path, 60),
+          getCoOccurringEntities(c.env.DB, user, path, 12),
         ])
-      : [[], []];
-    return c.html(renderWikiPage({ user, page, imageSrc, inbound, photos }));
+      : [[], [], []];
+    return c.html(renderWikiPage({ user, page, imageSrc, inbound, photos, related }));
   } catch (err) {
     console.error("wiki render error", err);
     return c.html(renderError(errMsg(err)), 500);
@@ -540,6 +543,17 @@ app.get("/me/timeline", async (c) => {
     return c.html(renderTimeline({ user, points }));
   } catch (err) {
     console.error("timeline error", err);
+    return c.html(renderError(errMsg(err)), 500);
+  }
+});
+
+app.get("/me/graph", async (c) => {
+  const user = defaultUserId(c.env);
+  try {
+    const data = await buildKnowledgeGraph(c.env.DB, user, { maxNodes: 500 });
+    return c.html(renderKnowledgeGraph({ user, data }));
+  } catch (err) {
+    console.error("graph error", err);
     return c.html(renderError(errMsg(err)), 500);
   }
 });

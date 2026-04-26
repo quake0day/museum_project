@@ -1,9 +1,10 @@
 import type { InteractionRow, Stats } from "./db";
 import { escapeHtml, formatDate } from "./util";
-import type { WikiPageRow, WikiSearchHit, InboundExhibit } from "./wiki/db";
+import type { WikiPageRow, WikiSearchHit, InboundExhibit, CoOccurrence } from "./wiki/db";
 import type { DashboardData } from "./wiki/dashboard";
 import type { EncyclopediaData } from "./wiki/encyclopedia";
 import { kindLabel, kindRank } from "./wiki/encyclopedia";
+import type { GraphData } from "./wiki/graph";
 import { renderMarkdown } from "./wiki/render";
 
 function layout(opts: { title: string; active?: string; body: string }): string {
@@ -54,6 +55,7 @@ function layout(opts: { title: string; active?: string; body: string }): string 
         ${navLink("/wiki/default/index", "My Wiki", "wiki")}
         ${navLink("/me/timeline", "Timeline", "timeline")}
         ${navLink("/me/map", "Map", "map")}
+        ${navLink("/me/graph", "Graph", "graph")}
         ${navLink("/me/quests", "Quests", "quests")}
         ${navLink("/interactions/view", "Captures", "list")}
       </nav>
@@ -849,10 +851,12 @@ export function renderWikiPage(opts: {
   imageSrc: string | null;
   inbound?: Array<{ path: string; title: string; kind: string; relation: string | null }>;
   photos?: InboundExhibit[];
+  related?: CoOccurrence[];
 }): string {
   const { user, page, imageSrc } = opts;
   const inbound = opts.inbound ?? [];
   const photos = opts.photos ?? [];
+  const related = opts.related ?? [];
   let fm: Record<string, unknown> = {};
   try {
     fm = page.frontmatter_json ? JSON.parse(page.frontmatter_json) : {};
@@ -925,6 +929,25 @@ export function renderWikiPage(opts: {
       <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">💬 Ask the wiki</a>
     </div>`;
 
+  // 2-hop co-occurrence strip — entities that share exhibits with this one
+  // even if the LLM didn't link them directly.
+  const relatedHtml = related.length
+    ? `
+    <aside class="wiki-related" aria-label="Often appears with">
+      <h3>Often appears with <span class="muted">— in your captures</span></h3>
+      <div class="wiki-related-row">
+        ${related.map((r) => {
+          const href = `/wiki/${encodeURIComponent(user)}/${r.path.split("/").map(encodeURIComponent).join("/")}`;
+          return `<a class="wiki-related-chip" href="${href}">
+            <span class="wiki-related-kind">${escapeHtml(r.kind)}</span>
+            <strong>${escapeHtml(r.title)}</strong>
+            <span class="wiki-related-w" title="${r.weight} shared exhibit${r.weight === 1 ? "" : "s"}">×${r.weight}</span>
+          </a>`;
+        }).join("")}
+      </div>
+    </aside>`
+    : "";
+
   const inboundHtml = inbound.length
     ? `
     <aside class="wiki-inbound" aria-label="Pages that link here">
@@ -996,6 +1019,7 @@ export function renderWikiPage(opts: {
         ${html}
       </article>
       ${galleryHtml}
+      ${relatedHtml}
       ${inboundHtml}
       <details class="wiki-meta">
         <summary>Page info <span class="muted">(for grown-ups)</span></summary>
@@ -1209,6 +1233,55 @@ export function renderWikiPage(opts: {
     @media (max-width: 600px) {
       .wiki-gallery-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .5rem; }
       .wiki-thumb-cap { opacity: 1; }
+    }
+
+    .wiki-related {
+      margin-top: 2rem;
+      padding: 1rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+    }
+    .wiki-related h3 {
+      margin: 0 0 .85rem;
+      font-size: 1rem;
+      font-family: 'Fraunces', serif;
+      color: var(--primary);
+    }
+    .wiki-related-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .wiki-related-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .4rem .7rem .4rem .55rem;
+      border-radius: 999px;
+      background: var(--bg-soft);
+      border: 1px solid var(--border);
+      color: var(--ink);
+      font-size: .88rem;
+      transition: background .15s, border-color .15s, transform .15s;
+    }
+    .wiki-related-chip:hover {
+      background: var(--primary-soft);
+      border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+      transform: translateY(-1px);
+      color: var(--primary-ink);
+    }
+    .wiki-related-kind {
+      font-size: .65rem;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      padding: 0 .35rem;
+      border-radius: 4px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+    }
+    .wiki-related-w {
+      font-size: .72rem;
+      color: var(--accent-ink);
+      font-variant-numeric: tabular-nums;
+      padding-left: .15rem;
     }
 
     .wiki-inbound {
@@ -1854,74 +1927,603 @@ export function renderQuests(opts: {
   return layout({ title: "Quests — MuseIQ", body });
 }
 
+export function renderKnowledgeGraph(opts: {
+  user: string;
+  data: GraphData;
+}): string {
+  const { user, data } = opts;
+  const dataJson = JSON.stringify({
+    nodes: data.nodes,
+    edges: data.edges.map((e) => ({ source: e.source, target: e.target, weight: e.weight, via: e.via })),
+  });
+  const body = `
+  <section class="wiki">
+    <div class="container kg-container">
+      <header style="margin-bottom: 1rem;">
+        <p class="eyebrow">Cross-page view</p>
+        <h1>Knowledge graph</h1>
+        <p class="muted">${data.nodes.length} entity page${data.nodes.length === 1 ? "" : "s"}, ${data.edges.length} connection${data.edges.length === 1 ? "" : "s"}. Two pages connect when an exhibit cites both. Drag a node to rearrange, scroll to zoom, click to open. Filter by subject below.</p>
+      </header>
+
+      <div class="kg-toolbar">
+        <div class="kg-filters" id="kg-filters">
+          <button type="button" class="kg-filter is-active" data-domain="all">All</button>
+          <button type="button" class="kg-filter domain-history" data-domain="history">🏺 History</button>
+          <button type="button" class="kg-filter domain-art" data-domain="art">🎨 Art</button>
+          <button type="button" class="kg-filter domain-science" data-domain="science">🦖 Science</button>
+          <button type="button" class="kg-filter domain-tech" data-domain="tech">⚙️ Tech</button>
+          <button type="button" class="kg-filter domain-culture" data-domain="culture">🌍 Culture</button>
+          <button type="button" class="kg-filter" data-domain="other">✨ Other</button>
+        </div>
+        <div class="kg-controls">
+          <input type="search" id="kg-search" placeholder="Find a page…" />
+          <button type="button" id="kg-reset">Reset view</button>
+        </div>
+      </div>
+
+      <div id="kg-wrap" class="kg-wrap">
+        <svg id="kg-svg"></svg>
+        <div id="kg-tip" class="kg-tip" hidden></div>
+        <p id="kg-empty" class="muted" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:2rem;" ${data.nodes.length ? "hidden" : ""}>
+          The graph is empty. Capture more exhibits and the AI will start linking concepts together here.
+        </p>
+      </div>
+
+      <p class="muted" style="font-size:.85rem;margin-top:.75rem;">Tip: hover a node to see its label, click to open the page. Drag the canvas to pan. Drag a node to rearrange.</p>
+    </div>
+  </section>
+
+  <style>
+    .kg-container { max-width: 1280px; padding: 1.5rem 1.5rem 4rem; }
+    .kg-toolbar { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: space-between; margin: 0 0 .75rem; align-items: center; }
+    .kg-filters { display: flex; gap: .35rem; flex-wrap: wrap; }
+    .kg-filter {
+      padding: .35rem .75rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--ink-soft);
+      font-size: .82rem;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .kg-filter:hover { color: var(--ink); border-color: var(--border-strong); }
+    .kg-filter.is-active {
+      background: var(--primary);
+      color: #FFFDF8;
+      border-color: var(--primary);
+    }
+    .kg-filter.domain-history.is-active  { background: var(--d-history); color:#FFFDF8; border-color: var(--d-history); }
+    .kg-filter.domain-art.is-active      { background: var(--d-art);     color:#FFFDF8; border-color: var(--d-art); }
+    .kg-filter.domain-science.is-active  { background: var(--d-science); color:#FFFDF8; border-color: var(--d-science); }
+    .kg-filter.domain-tech.is-active     { background: var(--d-tech);    color:#FFFDF8; border-color: var(--d-tech); }
+    .kg-filter.domain-culture.is-active  { background: var(--d-culture); color:#FFFDF8; border-color: var(--d-culture); }
+
+    .kg-controls { display: flex; gap: .35rem; align-items: center; }
+    .kg-controls input {
+      padding: .35rem .65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--ink);
+      font-size: .85rem;
+      font-family: inherit;
+      width: 200px;
+    }
+    .kg-controls button {
+      padding: .35rem .8rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--ink);
+      font-size: .82rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .kg-wrap {
+      position: relative;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      height: 720px;
+    }
+    .kg-wrap svg { width: 100%; height: 100%; cursor: grab; user-select: none; }
+    .kg-wrap svg:active { cursor: grabbing; }
+
+    .kg-edge { stroke-opacity: 0.45; }
+    .kg-node circle { cursor: pointer; transition: stroke-width .15s ease; }
+    .kg-node circle:hover { stroke: var(--ink); stroke-width: 2.5px; }
+    .kg-node text {
+      font-family: 'Inter', sans-serif;
+      pointer-events: none;
+      user-select: none;
+    }
+    .kg-node.is-dim { opacity: 0.18; }
+    .kg-node.is-dim text { display: none; }
+    .kg-edge.is-dim { stroke-opacity: 0.06; }
+
+    .kg-tip {
+      position: absolute;
+      pointer-events: none;
+      background: var(--ink);
+      color: #FFFDF8;
+      padding: .5rem .7rem;
+      border-radius: 8px;
+      font-size: .82rem;
+      max-width: 240px;
+      box-shadow: var(--shadow-md);
+      z-index: 10;
+      transform: translate(-50%, -100%);
+      margin-top: -10px;
+    }
+    .kg-tip strong { display: block; }
+    .kg-tip small { color: var(--accent); font-size: .68rem; letter-spacing: .04em; text-transform: uppercase; }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js" crossorigin="anonymous"></script>
+  <script>
+  (function () {
+    var raw = ${dataJson};
+    if (!raw.nodes.length || typeof d3 === 'undefined') return;
+
+    var COLOR = {
+      history: getCSS('--d-history'),
+      art: getCSS('--d-art'),
+      science: getCSS('--d-science'),
+      tech: getCSS('--d-tech'),
+      technology: getCSS('--d-tech'),
+      culture: getCSS('--d-culture'),
+      other: getCSS('--ink-muted'),
+    };
+    function getCSS(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#475569';
+    }
+
+    var wrap = document.getElementById('kg-wrap');
+    var svgEl = document.getElementById('kg-svg');
+    var tipEl = document.getElementById('kg-tip');
+    var rect = wrap.getBoundingClientRect();
+    var W = rect.width, H = rect.height;
+
+    var svg = d3.select(svgEl).attr('viewBox', '0 0 ' + W + ' ' + H);
+    var viewport = svg.append('g').attr('class', 'kg-viewport');
+
+    var nodes = raw.nodes.map(function (n) { return Object.assign({}, n); });
+    var links = raw.edges.map(function (e) { return Object.assign({}, e); });
+
+    function radius(n) {
+      // Sized by inbound count, capped so popular hubs don't dominate
+      return 4 + Math.min(14, Math.sqrt(Math.max(1, n.inbound)) * 1.6);
+    }
+
+    var linkSel = viewport.append('g').attr('class', 'edges')
+      .selectAll('line').data(links).enter().append('line')
+        .attr('class', 'kg-edge')
+        .attr('stroke', function (d) { return d.via === 'direct' ? '#94a3b8' : '#cbd5e1'; })
+        .attr('stroke-dasharray', function (d) { return d.via === 'direct' ? '4 3' : null; })
+        .attr('stroke-width', function (d) { return Math.max(0.6, Math.min(3.5, Math.log2(d.weight + 1) * 1.1)); });
+
+    var nodeSel = viewport.append('g').attr('class', 'nodes')
+      .selectAll('g').data(nodes).enter().append('g')
+        .attr('class', 'kg-node');
+
+    nodeSel.append('circle')
+      .attr('r', radius)
+      .attr('fill', function (d) { return COLOR[d.domain] || COLOR.other; })
+      .attr('stroke', '#FFFDF8')
+      .attr('stroke-width', 1.5);
+
+    nodeSel.append('text')
+      .attr('y', function (d) { return -(radius(d) + 4); })
+      .attr('text-anchor', 'middle')
+      .attr('font-size', function (d) { return d.inbound >= 5 ? 11 : 10; })
+      .attr('font-weight', function (d) { return d.inbound >= 5 ? 600 : 500; })
+      .attr('fill', 'var(--ink)')
+      .attr('opacity', function (d) { return d.inbound >= 3 ? 0.92 : 0; })
+      .text(function (d) {
+        var t = d.title || d.id;
+        return t.length > 22 ? t.slice(0, 21) + '…' : t;
+      });
+
+    nodeSel.on('mouseenter', function (event, d) {
+      var t = d3.select(this).select('text');
+      t.attr('opacity', 1);
+      var c = this.getBoundingClientRect();
+      var w = wrap.getBoundingClientRect();
+      tipEl.hidden = false;
+      tipEl.innerHTML = '<small>' + esc(d.kind) + ' · ' + esc(d.domain) + '</small><strong>' + esc(d.title) + '</strong>'
+        + (d.inbound > 0 ? '<div style="font-size:.7rem;color:#cbd5e1;margin-top:.15rem;">' + d.inbound + ' exhibit' + (d.inbound===1?'':'s') + ' link here</div>' : '');
+      tipEl.style.left = (c.left - w.left + c.width / 2) + 'px';
+      tipEl.style.top = (c.top - w.top) + 'px';
+    });
+    nodeSel.on('mouseleave', function (event, d) {
+      d3.select(this).select('text').attr('opacity', d.inbound >= 3 ? 0.92 : 0);
+      tipEl.hidden = true;
+    });
+    nodeSel.on('click', function (event, d) {
+      window.location.href = '/wiki/${user}/' + d.id.split('/').map(encodeURIComponent).join('/');
+    });
+
+    var sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(function (d) { return d.id; })
+        .distance(function (l) { return 60 + 24 / (l.weight + 1); })
+        .strength(function (l) { return Math.min(0.9, 0.15 + l.weight * 0.08); }))
+      .force('charge', d3.forceManyBody().strength(-220))
+      .force('center', d3.forceCenter(W / 2, H / 2))
+      .force('collide', d3.forceCollide().radius(function (d) { return radius(d) + 14; }))
+      .alphaDecay(0.04)
+      .on('tick', function () {
+        linkSel
+          .attr('x1', function (d) { return d.source.x; })
+          .attr('y1', function (d) { return d.source.y; })
+          .attr('x2', function (d) { return d.target.x; })
+          .attr('y2', function (d) { return d.target.y; });
+        nodeSel.attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+      });
+
+    // Drag
+    var drag = d3.drag()
+      .on('start', function (event, d) {
+        if (!event.active) sim.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', function (event, d) {
+        d.fx = event.x; d.fy = event.y;
+      })
+      .on('end', function (event, d) {
+        if (!event.active) sim.alphaTarget(0);
+        // Release after drag — let layout reflow
+        d.fx = null; d.fy = null;
+      });
+    nodeSel.call(drag);
+
+    // Pan + zoom
+    var zoom = d3.zoom().scaleExtent([0.2, 4])
+      .on('zoom', function (event) {
+        viewport.attr('transform', event.transform.toString());
+      });
+    svg.call(zoom);
+    document.getElementById('kg-reset').addEventListener('click', function () {
+      svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
+    });
+
+    // Domain filter
+    var activeDomain = 'all';
+    document.querySelectorAll('.kg-filter').forEach(function (b) {
+      b.addEventListener('click', function () {
+        document.querySelectorAll('.kg-filter').forEach(function (x) { x.classList.remove('is-active'); });
+        b.classList.add('is-active');
+        activeDomain = b.getAttribute('data-domain');
+        applyFilter();
+      });
+    });
+    function applyFilter() {
+      nodeSel.classed('is-dim', function (d) {
+        return activeDomain !== 'all' && d.domain !== activeDomain;
+      });
+      linkSel.classed('is-dim', function (l) {
+        if (activeDomain === 'all') return false;
+        var s = typeof l.source === 'object' ? l.source : nodes.find(function (n) { return n.id === l.source; });
+        var t = typeof l.target === 'object' ? l.target : nodes.find(function (n) { return n.id === l.target; });
+        return !(s && t && s.domain === activeDomain && t.domain === activeDomain);
+      });
+    }
+
+    // Search highlight
+    var searchEl = document.getElementById('kg-search');
+    searchEl.addEventListener('input', function () {
+      var q = (searchEl.value || '').toLowerCase().trim();
+      if (!q) { applyFilter(); return; }
+      nodeSel.classed('is-dim', function (d) {
+        return d.title.toLowerCase().indexOf(q) < 0;
+      });
+      linkSel.classed('is-dim', function (l) {
+        var s = typeof l.source === 'object' ? l.source : nodes.find(function (n) { return n.id === l.source; });
+        var t = typeof l.target === 'object' ? l.target : nodes.find(function (n) { return n.id === l.target; });
+        return !(s && t && (s.title.toLowerCase().indexOf(q) >= 0 || t.title.toLowerCase().indexOf(q) >= 0));
+      });
+    });
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+      });
+    }
+  })();
+  </script>`;
+  return layout({ title: "Knowledge graph — MuseIQ", active: "graph", body });
+}
+
 export function renderTimeline(opts: {
   user: string;
   points: Array<{ id: string; title: string; approx_year: number; primary_domain: string | null; child_summary: string | null }>;
 }): string {
   const { user, points } = opts;
-
-  // Symmetric log-ish scale: signed_log(y) = sign(y) * log10(|y|+1)
-  // so we can fit -200,000,000 (fossils) to +2026 on one axis without
-  // collapsing the modern era.
-  const slog = (y: number) => Math.sign(y) * Math.log10(Math.abs(y) + 1);
-  const W = 1000;
-  const H = 360;
-  const padX = 60;
-  const xs = points.map((p) => slog(p.approx_year));
-  const yearStart = points.length ? Math.min(...xs) : -8;
-  const yearEnd = points.length ? Math.max(...xs) : 4;
-  const span = (yearEnd - yearStart) || 1;
-  const xOf = (y: number) => padX + ((slog(y) - yearStart) / span) * (W - 2 * padX);
-
-  // ticks at decade-of-magnitude breakpoints so axis stays readable
-  const tickYears = [-200_000_000, -100_000, -10_000, -2000, -500, 0, 1500, 1800, 1900, 2000];
-  const ticks = tickYears
-    .filter((t) => slog(t) >= yearStart - 0.1 && slog(t) <= yearEnd + 0.1)
-    .map((t) => `<g><line x1="${xOf(t)}" y1="${H - 50}" x2="${xOf(t)}" y2="${H - 30}" stroke="#cbd5e1" /><text x="${xOf(t)}" y="${H - 14}" text-anchor="middle" font-size="11" fill="#64748b">${formatYear(t)}</text></g>`)
-    .join("");
-
-  const domainColor: Record<string, string> = {
-    history: "#92400e",
-    art: "#a855f7",
-    science: "#10b981",
-    tech: "#0ea5e9",
-    technology: "#0ea5e9",
-    culture: "#f59e0b",
-  };
-
-  const pins = points.map((p, i) => {
-    const cx = xOf(p.approx_year);
-    // Stagger Y positions to avoid overlap when many points share an era
-    const cy = 80 + ((i * 31) % (H - 180));
-    const color = domainColor[p.primary_domain ?? ""] ?? "#475569";
-    const href = `/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(p.id)}`;
-    const tip = `${p.title} (${formatYear(p.approx_year)})${p.child_summary ? "\n" + p.child_summary : ""}`;
-    return `<a href="${href}"><circle cx="${cx}" cy="${cy}" r="6" fill="${color}" opacity=".85" stroke="#fff" stroke-width="1.5"><title>${escapeHtml(tip)}</title></circle></a>`;
-  }).join("");
+  const data = points.map((p) => ({
+    id: p.id,
+    title: p.title,
+    year: p.approx_year,
+    domain: p.primary_domain ?? "other",
+    summary: p.child_summary ?? "",
+  }));
+  const dataJson = JSON.stringify(data);
 
   const body = `
   <section class="wiki">
     <div class="container">
-      <h1>Timeline</h1>
-      <p class="muted">${points.length} dated exhibit${points.length === 1 ? "" : "s"} on a symmetric-log axis from prehistory to today.</p>
-      ${points.length === 0
-        ? `<p class="muted">No dated exhibits yet — once the AI assigns approx_year via ingest, pins will appear here.</p>`
-        : `<div class="timeline-wrap">
-            <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Timeline of captured exhibits">
-              <line x1="${padX}" y1="${H - 40}" x2="${W - padX}" y2="${H - 40}" stroke="#94a3b8" stroke-width="1" />
-              ${ticks}
-              ${pins}
-            </svg>
-          </div>
-          <p class="muted" style="font-size:.85rem;">Hover a pin for details, click to open its wiki page. Pin color = domain.</p>`
-      }
+      <header style="margin-bottom: 1rem;">
+        <p class="eyebrow">Cross-time view</p>
+        <h1>Timeline</h1>
+        <p class="muted">${points.length} dated exhibit${points.length === 1 ? "" : "s"} on a symmetric-log axis from prehistory to today. Drag to pan, scroll or pinch to zoom, click a pin to open its wiki page.</p>
+      </header>
+
+      <div class="tl-legend" aria-label="Domain legend">
+        <span class="tl-leg tl-history">🏺 History</span>
+        <span class="tl-leg tl-art">🎨 Art</span>
+        <span class="tl-leg tl-science">🦖 Science</span>
+        <span class="tl-leg tl-tech">⚙️ Technology</span>
+        <span class="tl-leg tl-culture">🌍 Culture</span>
+      </div>
+
+      <div class="tl-wrap" id="tl-wrap">
+        ${points.length === 0
+          ? `<p class="muted" style="padding:2rem 0;">No dated exhibits yet — once the AI assigns approx_year via ingest, pins will appear here.</p>`
+          : `<div class="tl-controls">
+              <button type="button" data-tl-zoom="-1" aria-label="Zoom out">−</button>
+              <button type="button" data-tl-zoom="+1" aria-label="Zoom in">＋</button>
+              <button type="button" data-tl-reset aria-label="Reset view">Reset</button>
+            </div>
+            <svg id="tl-svg" role="img" aria-label="Timeline of captured exhibits"></svg>
+            <div id="tl-tip" class="tl-tip" hidden></div>`
+        }
+      </div>
     </div>
   </section>
+
   <style>
-    .timeline-wrap { overflow-x: auto; padding: .5rem 0; }
-    .timeline-wrap svg { width: 100%; min-width: 700px; height: auto; }
-  </style>`;
-  return layout({ title: "Timeline — MuseIQ", body });
+    .tl-legend { display:flex; gap:.5rem; flex-wrap: wrap; margin: 0 0 .75rem; font-size:.8rem; }
+    .tl-leg { padding:.18rem .55rem; border-radius:999px; background: var(--bg-elev); border:1px solid var(--border); }
+    .tl-history  { color: var(--d-history-ink);  border-color: color-mix(in srgb, var(--d-history) 30%, transparent); }
+    .tl-art      { color: var(--d-art-ink);      border-color: color-mix(in srgb, var(--d-art) 30%, transparent); }
+    .tl-science  { color: var(--d-science-ink);  border-color: color-mix(in srgb, var(--d-science) 30%, transparent); }
+    .tl-tech     { color: var(--d-tech-ink);     border-color: color-mix(in srgb, var(--d-tech) 30%, transparent); }
+    .tl-culture  { color: var(--d-culture-ink);  border-color: color-mix(in srgb, var(--d-culture) 30%, transparent); }
+
+    .tl-wrap {
+      position: relative;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      height: 520px;
+    }
+    .tl-wrap svg { width: 100%; height: 100%; cursor: grab; user-select: none; touch-action: none; }
+    .tl-wrap svg:active { cursor: grabbing; }
+    .tl-controls {
+      position: absolute; top: .65rem; right: .65rem; z-index: 5;
+      display: flex; gap: .25rem;
+    }
+    .tl-controls button {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--ink);
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      font-family: inherit;
+    }
+    .tl-controls button:hover { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+    .tl-controls [data-tl-reset] { width: auto; padding: 0 .85rem; font-size: .85rem; font-weight: 500; }
+
+    .tl-axis-line { stroke: var(--border-strong); stroke-width: 1; }
+    .tl-tick-line { stroke: var(--border-strong); stroke-width: 1; opacity: .6; }
+    .tl-tick-text { fill: var(--ink-muted); font-size: 11px; font-family: 'Inter', sans-serif; }
+    .tl-pin { cursor: pointer; transition: r .15s ease, opacity .15s ease; }
+    .tl-pin:hover { stroke: var(--ink); stroke-width: 2px; }
+
+    .tl-tip {
+      position: absolute;
+      pointer-events: none;
+      background: var(--ink);
+      color: #FFFDF8;
+      padding: .5rem .7rem;
+      border-radius: 8px;
+      font-size: .8rem;
+      max-width: 280px;
+      box-shadow: var(--shadow-md);
+      z-index: 10;
+      transform: translate(-50%, -100%);
+      margin-top: -8px;
+    }
+    .tl-tip strong { display:block; font-size: .85rem; margin-bottom: .15rem; }
+    .tl-tip .tl-tip-year { color: var(--accent); font-size: .7rem; letter-spacing: .04em; }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js" crossorigin="anonymous"></script>
+  <script>
+  (function () {
+    var data = ${dataJson};
+    if (!data.length || typeof d3 === 'undefined') return;
+
+    var COLORS = {
+      history: getCSS('--d-history'),
+      art: getCSS('--d-art'),
+      science: getCSS('--d-science'),
+      tech: getCSS('--d-tech'),
+      technology: getCSS('--d-tech'),
+      culture: getCSS('--d-culture'),
+      other: getCSS('--ink-muted'),
+    };
+    function getCSS(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#475569';
+    }
+
+    var wrap = document.getElementById('tl-wrap');
+    var svgEl = document.getElementById('tl-svg');
+    var tipEl = document.getElementById('tl-tip');
+    if (!wrap || !svgEl) return;
+
+    var rect = wrap.getBoundingClientRect();
+    var W = rect.width;
+    var H = rect.height;
+    var margin = { top: 24, right: 24, bottom: 48, left: 24 };
+
+    var svg = d3.select(svgEl).attr('viewBox', '0 0 ' + W + ' ' + H);
+
+    // Symmetric log scale so prehistory and the modern era both fit.
+    function slog(y) { return Math.sign(y) * Math.log10(Math.abs(y) + 1); }
+    function invSlog(s) { return Math.sign(s) * (Math.pow(10, Math.abs(s)) - 1); }
+
+    var years = data.map(function (d) { return d.year; });
+    var minY = d3.min(years);
+    var maxY = d3.max(years);
+    // Pad domain so extremes don't sit at the edge
+    var pad = Math.max(0.4, (slog(maxY) - slog(minY)) * 0.05);
+    var domain = [slog(minY) - pad, slog(maxY) + pad];
+
+    var x = d3.scaleLinear()
+      .domain(domain)
+      .range([margin.left, W - margin.right]);
+
+    // y is jittered so pins from the same era don't stack on top
+    var y = d3.scaleLinear()
+      .domain([0, 1])
+      .range([margin.top + 30, H - margin.bottom - 10]);
+
+    var jitter = data.map(function (_, i) {
+      // deterministic pseudo-random per index so pan/zoom stays stable
+      var x = Math.sin(i * 12.9898) * 43758.5453;
+      return x - Math.floor(x);
+    });
+
+    var gAxis = svg.append('g').attr('class', 'tl-axis');
+    var gPins = svg.append('g').attr('class', 'tl-pins');
+
+    // Static axis line
+    gAxis.append('line')
+      .attr('class', 'tl-axis-line')
+      .attr('x1', margin.left).attr('x2', W - margin.right)
+      .attr('y1', H - margin.bottom).attr('y2', H - margin.bottom);
+
+    // Pins (drawn once; transformed via zoom)
+    var pins = gPins.selectAll('circle')
+      .data(data)
+      .enter()
+      .append('circle')
+        .attr('class', 'tl-pin')
+        .attr('r', 6)
+        .attr('fill', function (d) { return COLORS[d.domain] || COLORS.other; })
+        .attr('opacity', 0.85)
+        .attr('stroke', '#FFFDF8')
+        .attr('stroke-width', 1.5)
+        .attr('cx', function (d) { return x(slog(d.year)); })
+        .attr('cy', function (d, i) { return y(jitter[i]); });
+
+    pins.on('mouseenter', function (event, d) {
+      var c = this.getBoundingClientRect();
+      var w = wrap.getBoundingClientRect();
+      tipEl.hidden = false;
+      tipEl.innerHTML = '<strong>' + esc(d.title) + '</strong>'
+        + '<span class="tl-tip-year">' + formatYear(d.year) + '</span>'
+        + (d.summary ? '<div style="margin-top:.3rem;line-height:1.4;">' + esc(d.summary) + '</div>' : '');
+      tipEl.style.left = (c.left - w.left + c.width / 2) + 'px';
+      tipEl.style.top  = (c.top  - w.top) + 'px';
+    });
+    pins.on('mouseleave', function () { tipEl.hidden = true; });
+    pins.on('click', function (event, d) {
+      window.location.href = '/wiki/${user}/exhibits/' + encodeURIComponent(d.id);
+    });
+
+    // Curated tick set; the ticks visible at any zoom level are filtered
+    // by the current x-domain, and we space them out so labels don't
+    // overlap.
+    var TICK_YEARS = [
+      -200000000, -65000000, -10000000, -1000000, -100000, -10000, -3000,
+      -1000, -500, -200, 0, 500, 1000, 1500, 1700, 1800, 1900, 1950, 2000, 2025
+    ];
+
+    function drawAxis(scale) {
+      var d0 = scale.domain()[0], d1 = scale.domain()[1];
+      var visible = TICK_YEARS
+        .map(function (y) { return { year: y, sx: slog(y) }; })
+        .filter(function (t) { return t.sx >= d0 && t.sx <= d1; });
+
+      // Greedy thinning so labels don't overlap (~80px minimum gap)
+      var minGap = 80;
+      var kept = [];
+      visible.forEach(function (t) {
+        var px = scale(t.sx);
+        if (!kept.length || px - kept[kept.length - 1].px >= minGap) {
+          kept.push({ year: t.year, sx: t.sx, px: px });
+        }
+      });
+
+      var ticks = gAxis.selectAll('g.tl-tick').data(kept, function (d) { return d.year; });
+      ticks.exit().remove();
+      var enter = ticks.enter().append('g').attr('class', 'tl-tick');
+      enter.append('line').attr('class', 'tl-tick-line')
+        .attr('y1', H - margin.bottom - 6).attr('y2', H - margin.bottom + 6);
+      enter.append('text').attr('class', 'tl-tick-text')
+        .attr('y', H - margin.bottom + 22).attr('text-anchor', 'middle');
+      var merged = enter.merge(ticks);
+      merged.attr('transform', function (d) { return 'translate(' + d.px + ',0)'; });
+      merged.select('text').text(function (d) { return formatYear(d.year); });
+    }
+
+    drawAxis(x);
+
+    // Zoom + pan via d3-zoom
+    var zoom = d3.zoom()
+      .scaleExtent([0.6, 60])
+      .translateExtent([[-W * 5, 0], [W * 6, H]])
+      .on('zoom', function (event) {
+        var t = event.transform;
+        var nx = t.rescaleX(x);
+        pins.attr('cx', function (d) { return nx(slog(d.year)); });
+        drawAxis(nx);
+      });
+
+    svg.call(zoom);
+
+    // Buttons
+    document.querySelectorAll('[data-tl-zoom]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var dir = parseInt(b.getAttribute('data-tl-zoom'), 10);
+        svg.transition().duration(220).call(zoom.scaleBy, dir > 0 ? 1.6 : 0.625);
+      });
+    });
+    var resetBtn = document.querySelector('[data-tl-reset]');
+    if (resetBtn) resetBtn.addEventListener('click', function () {
+      svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
+    });
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+      });
+    }
+    function formatYear(y) {
+      if (y === 0) return '0';
+      if (y < 0) {
+        var a = Math.abs(y);
+        if (a >= 1e6) return (a / 1e6).toFixed(0) + 'M BCE';
+        if (a >= 1e3) return (a / 1e3).toFixed(a >= 1e4 ? 0 : 1) + 'k BCE';
+        return a + ' BCE';
+      }
+      return y + ' CE';
+    }
+  })();
+  </script>`;
+  return layout({ title: "Timeline — MuseIQ", active: "timeline", body });
 }
 
 export function renderMap(opts: {

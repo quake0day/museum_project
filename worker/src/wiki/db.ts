@@ -195,6 +195,52 @@ export async function getInboundExhibits(
   return res.results ?? [];
 }
 
+// 2-hop co-occurrence: which other entity pages are cited by the same
+// exhibits as this one. Used for the "Often appears with" strip on entity
+// pages, where the LLM might not have made the link directly but the
+// shared exhibit reveals the relationship.
+export type CoOccurrence = {
+  path: string;
+  title: string;
+  kind: string;
+  weight: number; // number of shared exhibits
+};
+
+export async function getCoOccurringEntities(
+  db: D1Database,
+  userId: string,
+  dstPath: string,
+  limit = 12,
+): Promise<CoOccurrence[]> {
+  const res = await db
+    .prepare(
+      `SELECT
+         wl2.dst_path AS path,
+         wp_dst.title AS title,
+         wp_dst.kind AS kind,
+         COUNT(DISTINCT wl1.src_path) AS weight
+       FROM wiki_links wl1
+       JOIN wiki_links wl2
+         ON wl1.user_id = wl2.user_id AND wl1.src_path = wl2.src_path
+       JOIN wiki_pages wp_src
+         ON wp_src.user_id = wl1.user_id AND wp_src.path = wl1.src_path
+       JOIN wiki_pages wp_dst
+         ON wp_dst.user_id = wl2.user_id AND wp_dst.path = wl2.dst_path
+       WHERE wl1.user_id = ?1
+         AND wl1.dst_path = ?2
+         AND wl2.dst_path != ?2
+         AND wp_src.kind IN ('exhibit','exhibit_unknown')
+         AND wp_dst.kind NOT IN ('exhibit','exhibit_unknown','index','log')
+       GROUP BY wl2.dst_path, wp_dst.title, wp_dst.kind
+       HAVING weight >= 1
+       ORDER BY weight DESC, wp_dst.title ASC
+       LIMIT ?3`,
+    )
+    .bind(userId, dstPath, limit)
+    .all<CoOccurrence>();
+  return res.results ?? [];
+}
+
 export async function appendWikiLog(
   db: D1Database,
   userId: string,
