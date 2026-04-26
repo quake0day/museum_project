@@ -2,6 +2,8 @@ import type { InteractionRow, Stats } from "./db";
 import { escapeHtml, formatDate } from "./util";
 import type { WikiPageRow, WikiSearchHit } from "./wiki/db";
 import type { DashboardData } from "./wiki/dashboard";
+import type { EncyclopediaData } from "./wiki/encyclopedia";
+import { kindLabel, kindRank } from "./wiki/encyclopedia";
 import { renderMarkdown } from "./wiki/render";
 
 function layout(opts: { title: string; active?: string; body: string }): string {
@@ -1174,6 +1176,205 @@ function extractLeadingQuote(md: string): { quote: string | null; body: string }
 function stripLeadingHeading(md: string, title: string): string {
   const re = new RegExp(`^\\s*#\\s+${title.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*\\n`, "i");
   return md.replace(re, "");
+}
+
+export function renderEncyclopediaIndex(opts: {
+  user: string;
+  data: EncyclopediaData;
+}): string {
+  const { user, data } = opts;
+  const wikiPath = (p: string) => `/wiki/${encodeURIComponent(user)}/${p.split("/").map(encodeURIComponent).join("/")}`;
+
+  const navLinks = data.sections.map((s) =>
+    `<a href="#sec-${s.domain}" class="enc-jump domain-${s.domain}">
+      <span class="enc-jump-emoji">${s.emoji}</span>
+      <span class="enc-jump-label">${escapeHtml(s.label)}</span>
+      <span class="enc-jump-count">${s.total}</span>
+    </a>`
+  ).join("");
+
+  const sectionHtml = data.sections.map((s) => {
+    const kindKeys = Object.keys(s.byKind).sort((a, b) => kindRank(a) - kindRank(b));
+    const kindBlocks = kindKeys.map((k) => {
+      const entries = s.byKind[k];
+      const items = entries.map((e) => {
+        const inb = e.inbound_links > 0
+          ? `<span class="enc-meta">${e.inbound_links} link${e.inbound_links === 1 ? "" : "s"} in</span>`
+          : "";
+        const summary = e.summary ? `<span class="enc-summary">${escapeHtml(e.summary)}</span>` : "";
+        return `<li class="enc-entry">
+          <a href="${wikiPath(e.path)}" class="enc-entry-link">
+            <strong>${escapeHtml(e.title)}</strong>
+            ${summary}
+          </a>
+          ${inb}
+        </li>`;
+      }).join("");
+      return `<div class="enc-kind">
+        <h3 class="enc-kind-head">
+          <span class="enc-kind-label">${escapeHtml(kindLabel(k))}</span>
+          <span class="enc-kind-count">${entries.length}</span>
+        </h3>
+        <ul class="enc-list">${items}</ul>
+      </div>`;
+    }).join("");
+
+    return `<section class="enc-section domain-${s.domain}" id="sec-${s.domain}">
+      <header class="enc-section-head">
+        <span class="enc-section-emoji">${s.emoji}</span>
+        <h2>${escapeHtml(s.label)}</h2>
+        <span class="enc-section-count">${s.total} page${s.total === 1 ? "" : "s"}</span>
+      </header>
+      <div class="enc-kinds">${kindBlocks}</div>
+    </section>`;
+  }).join("");
+
+  const exhibitsCard = `
+    <a class="enc-exhibits" href="/interactions/view">
+      <div class="enc-exhibits-emoji">📸</div>
+      <div class="enc-exhibits-text">
+        <strong>${data.exhibitCount.toLocaleString()} captured exhibit${data.exhibitCount === 1 ? "" : "s"}</strong>
+        <span class="muted">Browse the photos you took at the museum</span>
+      </div>
+      <span class="enc-exhibits-arrow" aria-hidden="true">→</span>
+    </a>`;
+
+  const body = `
+  <section class="enc">
+    <div class="container enc-container">
+      <header class="enc-head">
+        <p class="eyebrow">${escapeHtml(user === "default" ? "Your" : user + "'s")} encyclopedia</p>
+        <h1>Wiki index</h1>
+        <p class="muted">${data.totalPages.toLocaleString()} entry page${data.totalPages === 1 ? "" : "s"}, organized by subject. Click a subject to jump to it.</p>
+      </header>
+
+      ${exhibitsCard}
+
+      ${data.sections.length ? `<nav class="enc-nav" aria-label="Subjects">${navLinks}</nav>` : ""}
+
+      <div class="enc-sections">${sectionHtml || `<p class="muted">No entry pages yet — capture more exhibits and the encyclopedia will grow here.</p>`}</div>
+
+      <p class="muted enc-foot">Last updated ${data.lastUpdated ? escapeHtml(data.lastUpdated.slice(0, 10)) : "—"} · <a href="/wiki/${encodeURIComponent(user)}/log">activity log</a></p>
+    </div>
+  </section>
+  <style>
+    .enc-container { max-width: 1080px; padding: 1.5rem 1.5rem 4rem; margin: 0 auto; }
+    .enc-head { margin-bottom: 1.5rem; }
+    .enc-head h1 { font-family: 'Fraunces', serif; font-size: clamp(2rem, 4vw, 2.8rem); margin: .25rem 0 .5rem; color: var(--ink); }
+    .enc-head p { font-size: 1rem; }
+
+    .enc-exhibits {
+      display: grid;
+      grid-template-columns: 56px 1fr 32px;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-left: 5px solid var(--primary);
+      border-radius: var(--radius-lg);
+      margin-bottom: 1.5rem;
+      color: inherit;
+      box-shadow: var(--shadow-sm);
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .enc-exhibits:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); color: inherit; }
+    .enc-exhibits-emoji { font-size: 2.2rem; line-height: 1; }
+    .enc-exhibits-text strong { font-family: 'Fraunces', serif; font-size: 1.15rem; color: var(--ink); display: block; }
+    .enc-exhibits-text .muted { font-size: .9rem; }
+    .enc-exhibits-arrow { font-size: 1.5rem; color: var(--primary); }
+
+    .enc-nav {
+      display: flex;
+      gap: .5rem;
+      flex-wrap: wrap;
+      padding: .75rem;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 2rem;
+      position: sticky;
+      top: 64px;
+      z-index: 5;
+      backdrop-filter: blur(8px);
+    }
+    .enc-jump {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .35rem .85rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--d-active, var(--primary)) 8%, var(--bg));
+      color: var(--d-active-ink, var(--primary));
+      font-size: .9rem;
+      font-weight: 500;
+      border: 1px solid color-mix(in srgb, var(--d-active, var(--primary)) 22%, transparent);
+      transition: background .15s, transform .15s;
+    }
+    .enc-jump:hover { color: var(--d-active-ink, var(--primary)); transform: translateY(-1px); }
+    .enc-jump-emoji { font-size: 1.05rem; line-height: 1; }
+    .enc-jump-count { font-size: .78rem; color: var(--ink-muted); padding: 0 .35rem; border-radius: 999px; background: var(--bg-elev); border: 1px solid var(--border); }
+
+    .enc-sections { display: grid; gap: 2.5rem; }
+    .enc-section { scroll-margin-top: 100px; }
+    .enc-section-head {
+      display: flex;
+      align-items: baseline;
+      gap: .75rem;
+      padding: .5rem 0 .75rem;
+      border-bottom: 2px solid color-mix(in srgb, var(--d-active, var(--primary)) 35%, transparent);
+      margin-bottom: 1.25rem;
+    }
+    .enc-section-emoji { font-size: 1.8rem; }
+    .enc-section-head h2 { font-family: 'Fraunces', serif; font-size: 1.7rem; margin: 0; color: var(--d-active-ink, var(--primary)); }
+    .enc-section-count { margin-left: auto; font-size: .82rem; color: var(--ink-muted); }
+
+    .enc-kinds { display: grid; gap: 1.5rem; grid-template-columns: 1fr; }
+    .enc-kind-head {
+      display: flex;
+      align-items: baseline;
+      gap: .5rem;
+      margin: 0 0 .5rem;
+      font-size: 1rem;
+    }
+    .enc-kind-label { font-family: 'Fraunces', serif; font-weight: 600; color: var(--ink); text-transform: capitalize; letter-spacing: -0.005em; }
+    .enc-kind-count { font-size: .78rem; color: var(--ink-muted); padding: 0 .45rem; border-radius: 999px; background: var(--bg-soft); border: 1px solid var(--border); }
+
+    .enc-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: .25rem .75rem;
+    }
+    .enc-entry {
+      padding: .5rem .25rem .5rem 0;
+      border-bottom: 1px dotted var(--border);
+      font-size: .92rem;
+    }
+    .enc-entry-link {
+      display: flex;
+      flex-direction: column;
+      gap: .15rem;
+      color: inherit;
+      text-decoration: none;
+    }
+    .enc-entry-link:hover strong { color: var(--d-active-ink, var(--primary)); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    .enc-entry-link strong { font-weight: 600; color: var(--ink); }
+    .enc-summary { color: var(--ink-soft); font-size: .85rem; line-height: 1.4; }
+    .enc-meta { font-size: .72rem; color: var(--ink-muted); margin-left: .35rem; }
+
+    .enc-foot { font-size: .85rem; margin-top: 3rem; text-align: center; }
+
+    @media (min-width: 760px) {
+      .enc-kinds { grid-template-columns: repeat(2, 1fr); gap: 1.5rem 2rem; }
+    }
+    @media (min-width: 1000px) {
+      .enc-kinds { grid-template-columns: repeat(3, 1fr); }
+    }
+  </style>`;
+  return layout({ title: "Wiki index — MuseIQ", active: "wiki", body });
 }
 
 export function renderWikiSyntheticPage(opts: {

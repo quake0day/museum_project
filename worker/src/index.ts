@@ -24,6 +24,7 @@ import {
   renderCompare,
   renderQuiz,
   renderStudentHome,
+  renderEncyclopediaIndex,
 } from "./templates";
 import {
   decodeDataUrl,
@@ -38,6 +39,7 @@ import { getAiProvider } from "./ai";
 import { ingestExhibit } from "./wiki/ingest";
 import { getWikiPage, getInboundLinks, wikiStats, searchWiki } from "./wiki/db";
 import { buildIndexPage, buildLogPage } from "./wiki/index_render";
+import { buildEncyclopedia } from "./wiki/encyclopedia";
 import { runLint } from "./wiki/lint";
 import { getMapPoints, getTimelinePoints } from "./wiki/views";
 import { evaluateQuests } from "./wiki/quests";
@@ -495,8 +497,8 @@ app.get("/wiki/:user/*", async (c) => {
   try {
     // Special live-rendered views.
     if (path === "index") {
-      const built = await buildIndexPage(c.env.DB, user);
-      return c.html(renderWikiSyntheticPage({ user, path, kind: "index", title: built.title, body: built.body }));
+      const enc = await buildEncyclopedia(c.env.DB, user);
+      return c.html(renderEncyclopediaIndex({ user, data: enc }));
     }
     if (path === "log") {
       const built = await buildLogPage(c.env.DB, user);
