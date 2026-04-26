@@ -157,6 +157,44 @@ export async function getInboundLinks(
   return res.results ?? [];
 }
 
+// Inbound exhibits with their captured photos. Used to render the photo
+// gallery on entity pages (concepts/places/periods/etc). Joins through
+// wiki_links → wiki_pages → interactions to get the image R2 key.
+export type InboundExhibit = {
+  exhibit_id: string;
+  exhibit_path: string;
+  title: string;
+  image: string;
+  primary_domain: string | null;
+  child_summary: string | null;
+};
+
+export async function getInboundExhibits(
+  db: D1Database,
+  userId: string,
+  dstPath: string,
+  limit = 60,
+): Promise<InboundExhibit[]> {
+  const res = await db
+    .prepare(
+      `SELECT i.id AS exhibit_id, wp.path AS exhibit_path, wp.title AS title,
+              i.image AS image, i.primary_domain, i.child_summary
+         FROM wiki_links wl
+         JOIN wiki_pages wp
+           ON wp.user_id = wl.user_id AND wp.path = wl.src_path
+         JOIN interactions i
+           ON i.user_id = wp.user_id AND wp.path = 'exhibits/' || i.id
+        WHERE wl.user_id = ?1 AND wl.dst_path = ?2
+          AND wp.kind IN ('exhibit','exhibit_unknown')
+          AND i.image IS NOT NULL
+        ORDER BY i.date DESC
+        LIMIT ?3`,
+    )
+    .bind(userId, dstPath, limit)
+    .all<InboundExhibit>();
+  return res.results ?? [];
+}
+
 export async function appendWikiLog(
   db: D1Database,
   userId: string,

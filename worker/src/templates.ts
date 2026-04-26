@@ -1,6 +1,6 @@
 import type { InteractionRow, Stats } from "./db";
 import { escapeHtml, formatDate } from "./util";
-import type { WikiPageRow, WikiSearchHit } from "./wiki/db";
+import type { WikiPageRow, WikiSearchHit, InboundExhibit } from "./wiki/db";
 import type { DashboardData } from "./wiki/dashboard";
 import type { EncyclopediaData } from "./wiki/encyclopedia";
 import { kindLabel, kindRank } from "./wiki/encyclopedia";
@@ -848,9 +848,11 @@ export function renderWikiPage(opts: {
   page: WikiPageRow;
   imageSrc: string | null;
   inbound?: Array<{ path: string; title: string; kind: string; relation: string | null }>;
+  photos?: InboundExhibit[];
 }): string {
   const { user, page, imageSrc } = opts;
   const inbound = opts.inbound ?? [];
+  const photos = opts.photos ?? [];
   let fm: Record<string, unknown> = {};
   try {
     fm = page.frontmatter_json ? JSON.parse(page.frontmatter_json) : {};
@@ -937,6 +939,33 @@ export function renderWikiPage(opts: {
     </aside>`
     : "";
 
+  // Photo gallery — only meaningful on entity pages with inbound exhibits.
+  // Capped at 12 visible by default; "Show all" expands inline.
+  const GALLERY_INITIAL = 12;
+  const galleryHtml = photos.length
+    ? `
+    <section class="wiki-gallery" aria-label="Photos from your captures">
+      <header class="wiki-gallery-head">
+        <h3>📸 Photos from your captures <span class="muted">(${photos.length})</span></h3>
+        ${photos.length > GALLERY_INITIAL
+          ? `<button type="button" class="btn btn-ghost btn-sm" data-gallery-toggle>Show all ${photos.length}</button>`
+          : ""}
+      </header>
+      <div class="wiki-gallery-grid" data-gallery-grid>
+        ${photos.map((p, i) => {
+          const src = "/media/" + p.image.split("/").map(encodeURIComponent).join("/");
+          const href = `/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(p.exhibit_id)}`;
+          const dom = p.primary_domain ?? "";
+          const tip = (p.title || "").trim();
+          return `<a class="wiki-thumb${i >= GALLERY_INITIAL ? " is-extra" : ""} domain-${escapeHtml(dom)}" href="${href}" title="${escapeHtml(tip)}"${i >= GALLERY_INITIAL ? ' hidden' : ''}>
+            <img src="${src}" alt="${escapeHtml(tip)}" loading="lazy" decoding="async" />
+            <span class="wiki-thumb-cap">${escapeHtml(tip)}</span>
+          </a>`;
+        }).join("")}
+      </div>
+    </section>`
+    : "";
+
   const imageHtml = imageSrc
     ? `<figure class="wiki-hero-img"><img src="${imageSrc}" alt="${escapeHtml(page.title)}" /></figure>`
     : "";
@@ -966,6 +995,7 @@ export function renderWikiPage(opts: {
       <article class="wiki-body">
         ${html}
       </article>
+      ${galleryHtml}
       ${inboundHtml}
       <details class="wiki-meta">
         <summary>Page info <span class="muted">(for grown-ups)</span></summary>
@@ -1099,6 +1129,88 @@ export function renderWikiPage(opts: {
     }
     .wiki-body a:hover { color: var(--primary); text-decoration-color: var(--primary); }
 
+    .wiki-gallery {
+      margin: 2.5rem 0 1rem;
+      padding: 1.25rem 1.25rem 1rem;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+    .wiki-gallery-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .wiki-gallery-head h3 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-family: 'Fraunces', serif;
+      color: var(--primary);
+    }
+    .wiki-gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: .65rem;
+    }
+    .wiki-thumb {
+      position: relative;
+      aspect-ratio: 1 / 1;
+      display: block;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--bg-soft);
+      box-shadow: var(--shadow-sm);
+      transition: transform .18s var(--ease), box-shadow .18s var(--ease);
+      text-decoration: none;
+      color: inherit;
+      isolation: isolate;
+    }
+    .wiki-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform .35s var(--ease);
+    }
+    .wiki-thumb:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); color: inherit; }
+    .wiki-thumb:hover img { transform: scale(1.04); }
+    .wiki-thumb::after {
+      /* domain-tinted top edge so a wall of photos still has subtle category cues */
+      content: "";
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 4px;
+      background: var(--d-active, var(--primary));
+      opacity: .65;
+      z-index: 1;
+    }
+    .wiki-thumb-cap {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      padding: .55rem .65rem .5rem;
+      font-size: .78rem;
+      line-height: 1.25;
+      color: #FFFDF8;
+      background: linear-gradient(180deg, rgba(15, 22, 32, 0) 0%, rgba(15, 22, 32, 0.78) 80%);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity .18s ease;
+      pointer-events: none;
+    }
+    .wiki-thumb:hover .wiki-thumb-cap,
+    .wiki-thumb:focus-visible .wiki-thumb-cap { opacity: 1; }
+    @media (max-width: 600px) {
+      .wiki-gallery-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .5rem; }
+      .wiki-thumb-cap { opacity: 1; }
+    }
+
     .wiki-inbound {
       margin-top: 2rem;
       padding: 1rem 1.25rem;
@@ -1146,6 +1258,21 @@ export function renderWikiPage(opts: {
     if (stored && texts[stored]) setBand(stored);
     tabs.forEach(function (t) {
       t.addEventListener('click', function () { setBand(t.dataset.band); });
+    });
+  })();
+
+  // Photo gallery — Show all toggle.
+  (function () {
+    var btn = document.querySelector('[data-gallery-toggle]');
+    var grid = document.querySelector('[data-gallery-grid]');
+    if (!btn || !grid) return;
+    var expanded = false;
+    btn.addEventListener('click', function () {
+      expanded = !expanded;
+      grid.querySelectorAll('.wiki-thumb.is-extra').forEach(function (el) {
+        el.hidden = !expanded;
+      });
+      btn.textContent = expanded ? 'Show fewer' : 'Show all ' + grid.querySelectorAll('.wiki-thumb').length;
     });
   })();
   </script>`;
