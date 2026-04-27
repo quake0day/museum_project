@@ -164,7 +164,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
 
   const questBar = (q: typeof inProgress[number]) => {
     const pct = Math.min(100, Math.round((q.current / Math.max(1, q.target)) * 100));
-    return `<a href="/me/quests" class="dash-quest">
+    return `<a href="${L("/me/quests")}" class="dash-quest">
       <div class="dash-quest-emoji">${q.emoji}</div>
       <div class="dash-quest-body">
         <div class="dash-quest-row">
@@ -242,7 +242,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
         <a href="${L("/me/quests")}" class="muted">${ti("home.allbadges")}</a>
       </header>
       <div class="dash-badges">
-        ${earnedRecent.map((q) => `<a class="dash-badge" href="/me/quests" title="${escapeHtml(q.description)}">
+        ${earnedRecent.map((q) => `<a class="dash-badge" href="${L("/me/quests")}" title="${escapeHtml(q.description)}">
           <div class="dash-badge-emoji">${q.emoji}</div>
           <div>
             <strong>${escapeHtml(q.title)}</strong>
@@ -355,8 +355,11 @@ export function renderLogin(opts: {
   error: string | null;
   currentUser: string;
   isSignedIn: boolean;
+  lang?: Lang;
 }): string {
   const { next, error, currentUser, isSignedIn } = opts;
+  const lang: Lang = opts.lang ?? "en";
+  const L = (p: string) => linkPath(lang, p);
   const safeNext = next.startsWith("/") ? next : "/";
   const body = `
   <section class="login-screen">
@@ -365,7 +368,7 @@ export function renderLogin(opts: {
       <h1>${ti("login.title")}</h1>
       <p class="muted">${ti("login.subtitle")}</p>
       ${error ? `<p class="login-error">${escapeHtml(error)}</p>` : ""}
-      <form method="POST" action="/login" class="login-form">
+      <form method="POST" action="${L("/login")}" class="login-form">
         <input type="hidden" name="next" value="${escapeHtml(safeNext)}" />
         <label for="login-name" class="login-label">${ti("login.label")}</label>
         <input id="login-name" type="text" name="name" placeholder="${tx("login.placeholder", "en")}" autofocus required maxlength="32" autocomplete="username" />
@@ -412,7 +415,7 @@ export function renderLogin(opts: {
     }
     .login-hint { font-size: .82rem; max-width: 360px; margin: 1rem auto 0; }
   </style>`;
-  return layout({ title: "Sign in — MuseIQ", body, currentUser, isSignedIn });
+  return layout({ title: "Sign in — MuseIQ", body, currentUser, isSignedIn, lang });
 }
 
 const DOMAIN_EMOJI: Record<string, string> = {
@@ -425,6 +428,8 @@ const DOMAIN_EMOJI: Record<string, string> = {
 };
 
 export function renderHome(data: { stats: Stats } & ChromeOpts): string {
+  const lang: Lang = data.lang ?? "en";
+  const L = (path: string) => linkPath(lang, path);
   const s = data.stats;
   const latest = s.latest_at ? formatDate(s.latest_at) : "—";
   const body = `
@@ -435,7 +440,7 @@ export function renderHome(data: { stats: Stats } & ChromeOpts): string {
         <h1>Curate how visitors <em>feel</em> the exhibits.</h1>
         <p class="lede">MuseIQ collects reflections, sketches, and photos from inside the gallery — synced from iOS, stored at the edge, ready to browse anywhere.</p>
         <div class="hero-ctas">
-          <a href="/interactions/view" class="btn btn-primary">Browse interactions <span aria-hidden="true">→</span></a>
+          <a href="${L("/interactions/view")}" class="btn btn-primary">Browse interactions <span aria-hidden="true">→</span></a>
           <a href="#api" class="btn btn-ghost">API reference</a>
         </div>
         <dl class="hero-stats" aria-label="Archive statistics">
@@ -688,7 +693,7 @@ export function renderList(data: {
           <input type="search" name="q" value="${escapeHtml(query)}" placeholder="Search responses…" aria-label="Search responses" autocomplete="off" />
           ${
             query
-              ? `<a class="search-clear" href="/interactions/view" aria-label="Clear search">×</a>`
+              ? `<a class="search-clear" href="${L("/interactions/view")}" aria-label="Clear search">×</a>`
               : ""
           }
           <button type="submit" class="btn btn-primary btn-sm">${ti("captures.search")}</button>
@@ -1650,7 +1655,9 @@ export function renderEncyclopediaIndex(opts: {
   data: EncyclopediaData;
 } & ChromeOpts): string {
   const { user, data } = opts;
-  const wikiPath = (p: string) => `/wiki/${encodeURIComponent(user)}/${p.split("/").map(encodeURIComponent).join("/")}`;
+  const lang: Lang = opts.lang ?? "en";
+  const L = (path: string) => linkPath(lang, path);
+  const wikiPath = (p: string) => L(`/wiki/${encodeURIComponent(user)}/${p.split("/").map(encodeURIComponent).join("/")}`);
 
   const navLinks = data.sections.map((s) =>
     `<a href="#sec-${s.domain}" class="enc-jump domain-${s.domain}">
@@ -1697,7 +1704,7 @@ export function renderEncyclopediaIndex(opts: {
   }).join("");
 
   const exhibitsCard = `
-    <a class="enc-exhibits" href="/interactions/view">
+    <a class="enc-exhibits" href="${L("/interactions/view")}">
       <div class="enc-exhibits-emoji">📸</div>
       <div class="enc-exhibits-text">
         <strong>${data.exhibitCount.toLocaleString()} ${ti("enc.exhibitsTitle")}</strong>
@@ -1725,7 +1732,7 @@ export function renderEncyclopediaIndex(opts: {
 
       <div class="enc-sections">${sectionHtml || `<p class="muted">${ti("enc.empty")}</p>`}</div>
 
-      <p class="muted enc-foot">${ti("enc.lastUpdated")} ${data.lastUpdated ? escapeHtml(data.lastUpdated.slice(0, 10)) : "—"} · <a href="/wiki/${encodeURIComponent(user)}/log">${ti("enc.activityLog")}</a></p>
+      <p class="muted enc-foot">${ti("enc.lastUpdated")} ${data.lastUpdated ? escapeHtml(data.lastUpdated.slice(0, 10)) : "—"} · <a href="${L(`/wiki/${encodeURIComponent(user)}/log`)}">${ti("enc.activityLog")}</a></p>
     </div>
   </section>
   <style>
@@ -1856,12 +1863,14 @@ export function renderWikiSyntheticPage(opts: {
   body: string;
 } & ChromeOpts): string {
   const { user, kind, title, body } = opts;
+  const lang: Lang = opts.lang ?? "en";
+  const L = (path: string) => linkPath(lang, path);
   const html = renderMarkdown(body);
   const pageBody = `
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
-        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
         <span aria-hidden="true">›</span>
         <span>${escapeHtml(kind)}</span>
       </nav>
@@ -1889,10 +1898,12 @@ export function renderWikiSearch(opts: {
   hits: WikiSearchHit[];
 } & ChromeOpts): string {
   const { user, query, hits } = opts;
+  const lang: Lang = opts.lang ?? "en";
+  const L = (path: string) => linkPath(lang, path);
   const results = hits.length
     ? `<ul class="search-results">${hits
         .map((h) => {
-          const href = `/wiki/${encodeURIComponent(user)}/${h.path.split("/").map(encodeURIComponent).join("/")}`;
+          const href = L(`/wiki/${encodeURIComponent(user)}/${h.path.split("/").map(encodeURIComponent).join("/")}`);
           // snippet contains <mark>…</mark> from FTS5; we trust those tags only.
           return `<li>
             <a href="${href}"><strong>${escapeHtml(h.title)}</strong></a>
@@ -1910,12 +1921,12 @@ export function renderWikiSearch(opts: {
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb">
-        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
         <span aria-hidden="true">›</span>
         <span>search</span>
       </nav>
       <h1>${ti("search.title")}</h1>
-      <form method="get" action="/wiki/${encodeURIComponent(user)}/_search" role="search" class="search-form">
+      <form method="get" action="${L(`/wiki/${encodeURIComponent(user)}/_search`)}" role="search" class="search-form">
         <input type="search" name="q" value="${escapeHtml(query)}" placeholder="bronze, ritual, perspective…" autofocus />
         <button class="btn btn-primary btn-sm" type="submit">Search</button>
       </form>
@@ -1949,18 +1960,20 @@ export function renderCompare(opts: {
   error: string | null;
 } & ChromeOpts): string {
   const { user, pathA, pathB, result, error } = opts;
-  const linkA = pathA ? `/wiki/${encodeURIComponent(user)}/${pathA.split("/").map(encodeURIComponent).join("/")}` : "";
-  const linkB = pathB ? `/wiki/${encodeURIComponent(user)}/${pathB.split("/").map(encodeURIComponent).join("/")}` : "";
+  const lang: Lang = opts.lang ?? "en";
+  const L = (path: string) => linkPath(lang, path);
+  const linkA = pathA ? L(`/wiki/${encodeURIComponent(user)}/${pathA.split("/").map(encodeURIComponent).join("/")}`) : "";
+  const linkB = pathB ? L(`/wiki/${encodeURIComponent(user)}/${pathB.split("/").map(encodeURIComponent).join("/")}`) : "";
   const body = `
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb">
-        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
         <span aria-hidden="true">›</span>
         <span>compare</span>
       </nav>
       <h1>${ti("compare.title")}</h1>
-      <form method="get" action="/wiki/${encodeURIComponent(user)}/_compare" class="ask-form" style="flex-direction:column;">
+      <form method="get" action="${L(`/wiki/${encodeURIComponent(user)}/_compare`)}" class="ask-form" style="flex-direction:column;">
         <label>${ti("compare.pathA")}<input type="text" name="a" value="${escapeHtml(pathA)}" placeholder="exhibits/abc-123" /></label>
         <label>${ti("compare.pathB")}<input type="text" name="b" value="${escapeHtml(pathB)}" placeholder="exhibits/def-456" /></label>
         <button class="btn btn-primary" type="submit" style="align-self:flex-start;">${ti("compare.submit")}</button>
@@ -1992,7 +2005,9 @@ export function renderQuiz(opts: {
   quiz: { pageTitle: string; pagePath: string; questions: Array<{ prompt: string; type: "mcq" | "free"; choices?: string[]; correct_index?: number; hint?: string; explanation: string }> };
 } & ChromeOpts): string {
   const { user, path, quiz } = opts;
-  const pageHref = `/wiki/${encodeURIComponent(user)}/${quiz.pagePath.split("/").map(encodeURIComponent).join("/")}`;
+  const lang: Lang = opts.lang ?? "en";
+  const L = (p: string) => linkPath(lang, p);
+  const pageHref = L(`/wiki/${encodeURIComponent(user)}/${quiz.pagePath.split("/").map(encodeURIComponent).join("/")}`);
   const items = quiz.questions.map((q, i) => {
     if (q.type === "mcq" && q.choices) {
       const opts = q.choices.map((c, j) => `<label class="quiz-opt">
@@ -2018,7 +2033,7 @@ export function renderQuiz(opts: {
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb">
-        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
         <span aria-hidden="true">›</span>
         <a href="${pageHref}">${escapeHtml(quiz.pageTitle)}</a>
         <span aria-hidden="true">›</span>
@@ -2105,13 +2120,15 @@ export function renderWikiAsk(opts: {
   error: string | null;
 } & ChromeOpts): string {
   const { user, question, contextPath, answer, error } = opts;
+  const lang: Lang = opts.lang ?? "en";
+  const L = (path: string) => linkPath(lang, path);
   const answerHtml = answer ? renderMarkdown(answer.answerMd) : "";
   const citationsHtml = answer && answer.citations.length
     ? `<aside class="ask-cites">
         <h3>${ti("ask.pagesRead")}</h3>
         <ul>
           ${answer.citations.map((c) => {
-            const href = `/wiki/${encodeURIComponent(user)}/${c.path.split("/").map(encodeURIComponent).join("/")}`;
+            const href = L(`/wiki/${encodeURIComponent(user)}/${c.path.split("/").map(encodeURIComponent).join("/")}`);
             return `<li><a href="${href}">${escapeHtml(c.title)}</a> <span class="muted">· ${escapeHtml(c.kind)}</span></li>`;
           }).join("")}
         </ul>
@@ -2121,13 +2138,13 @@ export function renderWikiAsk(opts: {
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb">
-        <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
         <span aria-hidden="true">›</span>
         <span>ask</span>
       </nav>
       <h1>${ti("ask.title")}</h1>
       <p class="muted">${ti("ask.lede")}</p>
-      <form method="get" action="/wiki/${encodeURIComponent(user)}/_ask" class="ask-form">
+      <form method="get" action="${L(`/wiki/${encodeURIComponent(user)}/_ask`)}" class="ask-form">
         ${contextPath ? `<input type="hidden" name="about" value="${escapeHtml(contextPath)}" />` : ""}
         <textarea name="q" rows="3" placeholder="${tx("ask.placeholder", "en")}" autofocus>${escapeHtml(question)}</textarea>
         <button class="btn btn-primary" type="submit">${ti("ask.submit")}</button>
@@ -2216,6 +2233,8 @@ export function renderKnowledgeGraph(opts: {
   data: GraphData;
 } & ChromeOpts): string {
   const { user, data } = opts;
+  const lang: Lang = opts.lang ?? "en";
+  const langPx = langPrefix(lang);
   const dataJson = JSON.stringify({
     nodes: data.nodes,
     edges: data.edges.map((e) => ({ source: e.source, target: e.target, weight: e.weight, via: e.via })),
@@ -2439,7 +2458,7 @@ export function renderKnowledgeGraph(opts: {
       tipEl.hidden = true;
     });
     nodeSel.on('click', function (event, d) {
-      window.location.href = '/wiki/${user}/' + d.id.split('/').map(encodeURIComponent).join('/');
+      window.location.href = '${langPx}/wiki/${user}/' + d.id.split('/').map(encodeURIComponent).join('/');
     });
 
     // Soft clamp so nodes never escape the viewport — keeps everything
@@ -2559,6 +2578,7 @@ export function renderTimeline(opts: {
 } & ChromeOpts): string {
   const { user, points } = opts;
   const lang: Lang = opts.lang ?? "en";
+  const langPx = langPrefix(lang);
   const data = points.map((p) => ({
     id: p.id,
     title: p.title,
@@ -2755,7 +2775,7 @@ export function renderTimeline(opts: {
     });
     pins.on('mouseleave', function () { tipEl.hidden = true; });
     pins.on('click', function (event, d) {
-      window.location.href = '/wiki/${user}/exhibits/' + encodeURIComponent(d.id);
+      window.location.href = '${langPx}/wiki/${user}/exhibits/' + encodeURIComponent(d.id);
     });
 
     // Curated tick set; the ticks visible at any zoom level are filtered
@@ -2846,6 +2866,8 @@ export function renderMap(opts: {
   points: Array<{ id: string; title: string; lat: number; lon: number; primary_domain: string | null; child_summary: string | null }>;
 } & ChromeOpts): string {
   const { user, points } = opts;
+  const lang: Lang = opts.lang ?? "en";
+  const langPx = langPrefix(lang);
   const ptJson = JSON.stringify(points.map((p) => ({
     id: p.id, title: p.title, lat: p.lat, lon: p.lon,
     domain: p.primary_domain ?? "",
@@ -2881,7 +2903,7 @@ export function renderMap(opts: {
         var summary = p.summary ? '<p style="margin:.4rem 0 0;font-size:.85rem;color:#475569;">' + escapeHtml(p.summary) + '</p>' : '';
         m.bindPopup(
           '<strong>' + e + ' ' + escapeHtml(p.title) + '</strong>' + summary +
-          '<p style="margin:.4rem 0 0;"><a href="/wiki/${encodeURIComponent(user)}/exhibits/' + encodeURIComponent(p.id) + '">Open wiki page →</a></p>'
+          '<p style="margin:.4rem 0 0;"><a href="${langPx}/wiki/${encodeURIComponent(user)}/exhibits/' + encodeURIComponent(p.id) + '">Open wiki page →</a></p>'
         );
         bounds.push([p.lat, p.lon]);
       });
@@ -2959,13 +2981,15 @@ export function renderLintReport(opts: {
 
 export function renderWikiNotFound(opts: { user: string; path: string } & ChromeOpts): string {
   const { user, path } = opts;
+  const lang: Lang = opts.lang ?? "en";
+  const L = (p: string) => linkPath(lang, p);
   const body = `
   <section class="error-screen">
     <div class="container error-inner">
       <p class="eyebrow">Wiki</p>
       <h1>This page hasn't been written yet.</h1>
       <p class="muted">No page at <code>${escapeHtml(path)}</code> for user <code>${escapeHtml(user)}</code>.</p>
-      <p>Try the <a href="/wiki/${encodeURIComponent(user)}/index">wiki index</a>, or capture more exhibits to grow this section.</p>
+      <p>Try the <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">wiki index</a>, or capture more exhibits to grow this section.</p>
     </div>
   </section>`;
   return layout({ title: "Wiki page not found — MuseIQ", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });

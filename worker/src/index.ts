@@ -213,7 +213,7 @@ app.get("/me", (c) => c.redirect("/", 302));
 
 app.get("/login", (c) => {
   const next = c.req.query("next") ?? "/";
-  return c.html(renderLogin({ next, error: null, currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn }));
+  return c.html(renderLogin({ next, error: null, currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang }));
 });
 
 app.post("/login", async (c) => {
@@ -230,6 +230,7 @@ app.post("/login", async (c) => {
       error: "Use letters, numbers, or hyphens (1–32 characters).",
       currentUser: c.var.currentUser,
       isSignedIn: c.var.isSignedIn,
+      lang: c.var.lang,
     }), 400);
   }
   const token = await signUserToken(secret, slug, USER_TTL_SECONDS);
