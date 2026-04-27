@@ -592,10 +592,12 @@ export function renderList(data: {
           // When the wiki page exists, the whole card becomes a link to it.
           // Otherwise the lightbox-trigger keeps its zoom-on-click behavior.
           const domainCls = domain ? `domain-${escapeHtml(domain)}` : "";
-          // Detect content language from whichever text we have. Cards
-          // tagged 'mixed' or 'unknown' are always shown; pure 'en' or
-          // 'zh' cards get filtered by the active UI lang via CSS.
-          const cardLang = detectLang((it.response ?? "") + " " + (it.child_summary ?? ""));
+          // Tag the card by what the CHILD typed only — the AI-generated
+          // summary is English in legacy rows and would dominate the
+          // detector, hiding cards whose actual user-typed response was
+          // Chinese. Cards with empty / mixed / non-Latin-non-CJK responses
+          // stay untagged and show in any UI lang.
+          const cardLang = detectLang(it.response ?? "");
           const cardLangAttr = (cardLang === "en" || cardLang === "zh") ? ` data-lang="${cardLang}"` : "";
           const cardOpen = wikiHref
             ? `<a class="card card-link ${domainCls}" href="${wikiHref}"${cardLangAttr}>`
@@ -1028,13 +1030,18 @@ export function renderWikiPage(opts: {
   const sum_8_10_zh  = _en("summary_8_10_zh");
   const sum_11_13_zh = _en("summary_11_13_zh");
   const hasAgeSummaries = !!(sum_5_7 || sum_8_10 || sum_11_13);
-  // Bilingual summary text: paired EN/ZH spans so the [data-lang] CSS rule
-  // hides whichever doesn't match the active <html lang>.
+  // Bilingual summary text: paired EN/ZH spans when both available so the
+  // [data-lang] CSS rule shows the right one. When only ONE language is
+  // available (legacy ingest), render plain text so the user always sees
+  // something — never an empty paragraph in the non-matching lang.
   function bilingualSummary(en: string | null, zh: string | null): string {
-    if (!en && !zh) return "";
-    const enHtml = en ? `<span data-lang="en">${escapeHtml(en)}</span>` : "";
-    const zhHtml = zh ? `<span data-lang="zh">${escapeHtml(zh)}</span>` : "";
-    return enHtml + zhHtml;
+    if (en && zh) {
+      return `<span data-lang="en">${escapeHtml(en)}</span>` +
+             `<span data-lang="zh">${escapeHtml(zh)}</span>`;
+    }
+    if (en) return escapeHtml(en);
+    if (zh) return escapeHtml(zh);
+    return "";
   }
 
   const isExhibit = page.kind === "exhibit" || page.kind === "exhibit_unknown";
@@ -1045,10 +1052,14 @@ export function renderWikiPage(opts: {
   const md = stripFrontmatter(page.body);
   const { quote: heroQuote, body: trimmedBody } = extractLeadingQuote(md);
   const html = renderMarkdown(stripLeadingHeading(trimmedBody, page.title));
-  // Detect content language from the body + title so [data-lang] CSS can
-  // hide pages that don't match the active UI lang.
-  const pageLang = detectLang(page.title + " " + md);
-  const pageLangAttr = (pageLang === "en" || pageLang === "zh") ? ` data-lang="${pageLang}"` : "";
+  // Only filter the body by data-lang if the LLM produced both languages
+  // (post-ANALYSIS_VERSION-4 ingest emits paired <div data-lang="en"> +
+  // <div data-lang="zh"> blocks). For legacy single-language bodies the
+  // inner divs handle hiding themselves; tagging the outer container would
+  // wipe the whole page out in the non-matching lang. Untagged → shows in
+  // any UI language.
+  const isBilingualBody = /<div\s+data-lang="en"/i.test(md) && /<div\s+data-lang="zh"/i.test(md);
+  const pageLangAttr = isBilingualBody ? "" : "";
 
   // Hero chips — strict diet: only the primary domain, plus a single
   // place/period summary line. No secondary-domain rainbow.
@@ -1581,11 +1592,15 @@ export function renderWikiPage(opts: {
         t.setAttribute('aria-selected', on ? 'true' : 'false');
       });
       if (host) {
-        // Replace with paired EN/ZH spans — same CSS rule hides one.
-        var html = '';
-        if (d.en) html += '<span data-lang="en">' + esc(d.en) + '</span>';
-        if (d.zh) html += '<span data-lang="zh">' + esc(d.zh) + '</span>';
-        host.innerHTML = html;
+        // Paired spans when both available; plain text when only one.
+        // Plain-text branch makes legacy single-lang data still readable
+        // in the non-matching UI lang.
+        if (d.en && d.zh) {
+          host.innerHTML = '<span data-lang="en">' + esc(d.en) + '</span>'
+                         + '<span data-lang="zh">' + esc(d.zh) + '</span>';
+        } else {
+          host.textContent = d.en || d.zh || '';
+        }
       }
       try { localStorage.setItem('museiq-age-band', band); } catch (e) {}
     }
