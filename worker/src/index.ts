@@ -95,27 +95,40 @@ const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 // URL-based language routing. Paths starting with /cn, /tw, /en set the
 // language and re-dispatch with the prefix stripped, so all downstream
 // routes (and link helpers) only ever see the canonical (unprefixed) path
-// plus c.var.lang. The cookie is set as a side effect so cross-prefix
-// navigation persists the choice.
+// plus c.var.lang.
+//
+// The trick to passing lang through the re-dispatch: we splice an extra
+// `museiq_lang=<lang>` entry into the outgoing request's Cookie header,
+// which the cookie middleware below picks up the same way it would for a
+// real browser cookie. The user's actual cookie is also set on the OUTGOING
+// response so the next non-prefixed visit remembers the choice.
 app.use("*", async (c, next) => {
   const url = new URL(c.req.url);
   const m = url.pathname.match(/^\/(cn|tw|en)(\/|$)/);
   if (m) {
     const langMap: Record<string, Lang> = { cn: "zh-CN", tw: "zh-TW", en: "en" };
     const newLang = langMap[m[1]];
-    // Persist
-    c.header(
-      "Set-Cookie",
-      `${LANG_COOKIE}=${encodeURIComponent(newLang)}; Secure; SameSite=Lax; Path=/; Max-Age=${LANG_TTL_SECONDS}`,
-    );
-    // Strip the prefix and re-dispatch
+    // Strip the prefix
     const stripped = url.pathname.slice(m[0].endsWith("/") ? m[0].length - 1 : m[0].length) || "/";
     url.pathname = stripped;
-    const newReq = new Request(url.toString(), c.req.raw);
-    // Re-enter the router with the rewritten request. Set the lang here
-    // too so the cookie middleware below picks it up on this dispatch.
+    // Build a new request whose Cookie header reflects the URL-chosen lang
+    const incomingCookie = c.req.raw.headers.get("cookie") || "";
+    const cookieParts = incomingCookie
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s && !s.startsWith(`${LANG_COOKIE}=`));
+    cookieParts.push(`${LANG_COOKIE}=${encodeURIComponent(newLang)}`);
+    const newHeaders = new Headers(c.req.raw.headers);
+    newHeaders.set("cookie", cookieParts.join("; "));
+    const newReq = new Request(url.toString(), {
+      method: c.req.raw.method,
+      headers: newHeaders,
+      body: ["GET", "HEAD"].includes(c.req.raw.method) ? undefined : c.req.raw.body,
+      redirect: "manual",
+    });
     const child = await app.fetch(newReq, c.env, c.executionCtx);
-    // Pass through the response, but include our Set-Cookie header.
+    // Persist the choice on the outgoing response so next no-prefix visit
+    // remembers it.
     const headers = new Headers(child.headers);
     headers.append(
       "Set-Cookie",
