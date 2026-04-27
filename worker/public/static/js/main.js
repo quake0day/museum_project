@@ -63,8 +63,12 @@
               <button type="submit" class="user-pill-out" aria-label="Sign out">↩</button>
             </form>`;
         } else {
+          // Honor the current /cn or /tw URL prefix so anonymous "Sign in"
+          // also lands on the prefixed login page.
+          const m = location.pathname.match(/^\/(cn|tw|en)(?=\/|$)/);
+          const prefix = m ? '/' + m[1] : '';
           userPillSlot.outerHTML =
-            `<a class="user-pill user-pill-anon" href="/login" data-user-pill>` +
+            `<a class="user-pill user-pill-anon" href="${prefix}/login" data-user-pill>` +
               `<span data-lang="en">Sign in</span>` +
               `<span data-lang="zh-CN">登录</span>` +
               `<span data-lang="zh-TW">登入</span>` +

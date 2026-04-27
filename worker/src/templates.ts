@@ -149,7 +149,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
 
   const recentCard = (r: typeof recent[number]) => {
     const src = "/media/" + r.image.split("/").map(encodeURIComponent).join("/");
-    const href = `/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(r.id)}`;
+    const href = L(`/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(r.id)}`);
     const dom = r.primary_domain ?? "";
     const emoji = DOMAIN_EMOJI[dom] ?? "✨";
     return `<a class="dash-recent-card domain-${escapeHtml(dom)}" href="${href}">
@@ -196,7 +196,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
 
   <section class="dash-block">
     <div class="container">
-      <a href="${nextAdventure.href}" class="dash-next">
+      <a href="${L(nextAdventure.href)}" class="dash-next">
         <div class="dash-next-emoji" aria-hidden="true">${nextAdventure.emoji}</div>
         <div class="dash-next-body">
           <p class="eyebrow">${ti("home.next")}</p>
