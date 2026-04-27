@@ -984,11 +984,24 @@ export function renderWikiPage(opts: {
   const approxYear = typeof fm.approx_year === "number" ? fm.approx_year : null;
   const confidence = typeof fm.confidence === "number" ? fm.confidence : null;
 
-  // Age-graded summaries — fall through to whatever exists.
-  const sum_5_7   = typeof fm.summary_5_7   === "string" ? fm.summary_5_7   : null;
-  const sum_8_10  = typeof fm.summary_8_10  === "string" ? fm.summary_8_10  : null;
-  const sum_11_13 = typeof fm.summary_11_13 === "string" ? fm.summary_11_13 : null;
+  // Age-graded summaries — fall through to whatever exists. With
+  // analysis_version >= 4 these come paired with `_zh` variants.
+  const _en = (k: string): string | null => (typeof (fm as any)[k] === "string" ? (fm as any)[k] : null);
+  const sum_5_7    = _en("summary_5_7");
+  const sum_8_10   = _en("summary_8_10");
+  const sum_11_13  = _en("summary_11_13");
+  const sum_5_7_zh   = _en("summary_5_7_zh");
+  const sum_8_10_zh  = _en("summary_8_10_zh");
+  const sum_11_13_zh = _en("summary_11_13_zh");
   const hasAgeSummaries = !!(sum_5_7 || sum_8_10 || sum_11_13);
+  // Bilingual summary text: paired EN/ZH spans so the [data-lang] CSS rule
+  // hides whichever doesn't match the active <html lang>.
+  function bilingualSummary(en: string | null, zh: string | null): string {
+    if (!en && !zh) return "";
+    const enHtml = en ? `<span data-lang="en">${escapeHtml(en)}</span>` : "";
+    const zhHtml = zh ? `<span data-lang="zh">${escapeHtml(zh)}</span>` : "";
+    return enHtml + zhHtml;
+  }
 
   const isExhibit = page.kind === "exhibit" || page.kind === "exhibit_unknown";
   const domainClass = domain ? `domain-${escapeHtml(domain)}` : "";
@@ -1021,19 +1034,20 @@ export function renderWikiPage(opts: {
 
   // Reading-level switcher: single thin row, no card. The selected band's
   // summary becomes the hero blockquote.
-  const bands: Array<{ key: "5_7" | "8_10" | "11_13"; label: string; text: string | null }> = [
-    { key: "5_7",   label: "5–7",   text: sum_5_7 },
-    { key: "8_10",  label: "8–10",  text: sum_8_10 },
-    { key: "11_13", label: "11–13", text: sum_11_13 },
+  const bands: Array<{ key: "5_7" | "8_10" | "11_13"; label: string; en: string | null; zh: string | null }> = [
+    { key: "5_7",   label: "5–7",   en: sum_5_7,   zh: sum_5_7_zh   },
+    { key: "8_10",  label: "8–10",  en: sum_8_10,  zh: sum_8_10_zh  },
+    { key: "11_13", label: "11–13", en: sum_11_13, zh: sum_11_13_zh },
   ];
-  const available = bands.filter((b) => b.text);
+  const available = bands.filter((b) => b.en || b.zh);
   const defaultBand = available.find((b) => b.key === "8_10")?.key ?? available[0]?.key;
+  const _defaultEntry = available.find((b) => b.key === defaultBand);
   const ageBlock = hasAgeSummaries ? `
-    <p class="wiki-summary" data-summary-host>${escapeHtml(available.find((b) => b.key === defaultBand)?.text ?? "")}</p>
+    <p class="wiki-summary" data-summary-host>${bilingualSummary(_defaultEntry?.en ?? null, _defaultEntry?.zh ?? null)}</p>
     <div class="wiki-age-row" data-age-toggle>
       <span class="wiki-age-label">${ti("wiki.readingLevel")}</span>
       ${available.map((b) => `<button type="button" data-band="${b.key}" class="wiki-age-tab${b.key === defaultBand ? " is-active" : ""}" aria-selected="${b.key === defaultBand}">${b.label}</button>`).join("")}
-      ${available.map((b) => `<template data-band-text="${b.key}">${escapeHtml(b.text ?? "")}</template>`).join("")}
+      ${available.map((b) => `<template data-band-text="${b.key}" data-band-en="${escapeHtml(b.en ?? "")}" data-band-zh="${escapeHtml(b.zh ?? "")}"></template>`).join("")}
     </div>` : (heroQuote ? `<p class="wiki-summary">${escapeHtml(heroQuote)}</p>` : "");
 
   const actions = isExhibit ? `
@@ -1174,7 +1188,14 @@ export function renderWikiPage(opts: {
           ${imageHtml}
           <div class="wiki-hero-text">
             ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
-            <h1>${escapeHtml(page.title)}</h1>
+            <h1>${(() => {
+              const titleZh = typeof fm.title_zh === "string" && fm.title_zh.trim() ? fm.title_zh : "";
+              if (titleZh) {
+                return `<span data-lang="en">${escapeHtml(page.title)}</span>` +
+                       `<span data-lang="zh">${escapeHtml(titleZh)}</span>`;
+              }
+              return escapeHtml(page.title);
+            })()}</h1>
             ${subtitle}
             ${ageBlock}
             ${actions}
@@ -1511,23 +1532,35 @@ export function renderWikiPage(opts: {
     if (!box) return;
     var host = document.querySelector('[data-summary-host]');
     var tabs = box.querySelectorAll('.wiki-age-tab');
-    var texts = {};
+    var bandData = {};
     box.querySelectorAll('template[data-band-text]').forEach(function (t) {
-      texts[t.dataset.bandText] = t.textContent || "";
+      bandData[t.dataset.bandText] = { en: t.dataset.bandEn || "", zh: t.dataset.bandZh || "" };
     });
     var stored = null;
     try { stored = localStorage.getItem('museiq-age-band'); } catch (e) {}
     function setBand(band) {
-      if (!texts[band]) return;
+      var d = bandData[band];
+      if (!d) return;
       tabs.forEach(function (t) {
         var on = t.dataset.band === band;
         t.classList.toggle('is-active', on);
         t.setAttribute('aria-selected', on ? 'true' : 'false');
       });
-      if (host) host.textContent = texts[band];
+      if (host) {
+        // Replace with paired EN/ZH spans — same CSS rule hides one.
+        var html = '';
+        if (d.en) html += '<span data-lang="en">' + esc(d.en) + '</span>';
+        if (d.zh) html += '<span data-lang="zh">' + esc(d.zh) + '</span>';
+        host.innerHTML = html;
+      }
       try { localStorage.setItem('museiq-age-band', band); } catch (e) {}
     }
-    if (stored && texts[stored]) setBand(stored);
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+      });
+    }
+    if (stored && bandData[stored]) setBand(stored);
     tabs.forEach(function (t) {
       t.addEventListener('click', function () { setBand(t.dataset.band); });
     });

@@ -17,6 +17,50 @@ inside the formats this document specifies.
 - For sensitive topics (violence, death, religion, nudity in art): state
   facts gently, focus on meaning to the people involved, never sensationalize.
 
+## Bilingual output (REQUIRED — analysis_version ≥ 4)
+
+Every page body and every entity body you produce must carry **both**
+English and Simplified Chinese, wrapped in language-tagged divs:
+
+```markdown
+<div data-lang="en">
+
+# Bronze Ritual Vessel
+
+> A bronze cup used by ancient Chinese kings during ceremonies for their ancestors.
+
+## What is it?
+
+A bronze vessel used in religious ceremonies, made by ruling families…
+
+</div>
+<div data-lang="zh">
+
+# 青铜礼器
+
+> 古代中国的国王在祭祀祖先的仪式中使用的青铜杯子。
+
+## 这是什么?
+
+一种用于宗教仪式的青铜器皿,由商周时期的王室家族铸造……
+
+</div>
+```
+
+Rules:
+- Both blocks must be complete, balanced markdown — same section
+  structure, same heading levels.
+- The Chinese version must be a faithful translation of the English (or
+  vice versa), at the same reading level and length.
+- The empty line between `<div ...>` and the markdown content is
+  **required** — markdown parsers need it.
+- Use `data-lang="zh"` (the bare value) — the runtime hides EN under
+  zh-CN/zh-TW and vice versa via a single CSS rule.
+- Do **not** use `<div data-lang="zh-CN">` or `"zh-TW"` — keep it simple
+  and let the renderer cover both Chinese variants.
+- For frontmatter title and the age-graded summaries, also produce
+  bilingual variants (see §Frontmatter contract below).
+
 ## Page kinds (where pages live)
 
 ```
@@ -62,7 +106,8 @@ analysis_version: 1                # bump if SCHEMA changes
 ### Required for `exhibit` pages
 ```yaml
 kind: exhibit
-title: "Bronze Ritual Vessel"
+title: "Bronze Ritual Vessel"          # English (canonical / fallback)
+title_zh: "青铜礼器"                     # Simplified Chinese — REQUIRED
 captured_at: 2026-04-26T14:30:00Z
 domain: history          # history | art | science | tech | culture
 secondary_domains: [art, technology]
@@ -90,10 +135,15 @@ origin_lon:    113.0
 # (a representative coordinate for the place — country centroid is fine).
 # These two pairs are how the timeline and map find your exhibit.
 
-# age-graded summaries — short, calibrated to reading level
+# age-graded summaries — short, calibrated to reading level (English)
 summary_5_7:   "Long ago people made fancy bowls out of metal for special meals."
 summary_8_10:  "This is a bronze cup used by ancient Chinese kings during ceremonies for their ancestors."
 summary_11_13: "A piece-mold cast bronze ritual vessel from Shang or Zhou-dynasty China, used in ancestor-worship ceremonies that reinforced rulers' authority."
+
+# Same summaries in Simplified Chinese — REQUIRED with analysis_version ≥ 4
+summary_5_7_zh:   "很久以前的人用金属做漂亮的碗,用在特别的饭桌上。"
+summary_8_10_zh:  "这是古代中国国王在祭祀祖先的仪式上使用的青铜杯。"
+summary_11_13_zh: "一件商周时期采用块范法铸造的青铜礼器,用于巩固统治者权威的祭祖仪式。"
 ```
 
 ### `exhibit_unknown` pages

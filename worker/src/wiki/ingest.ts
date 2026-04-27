@@ -310,7 +310,7 @@ async function callIngestLLM(ai: AiProvider, input: IngestInput): Promise<Envelo
 
     let result;
     try {
-      result = await ai.chat({ messages, json: true, temperature: 0.4, maxTokens: 6500 });
+      result = await ai.chat({ messages, json: true, temperature: 0.4, maxTokens: 8000 });
     } catch (e) {
       if (e instanceof AiError && e.retriable && attempt < MAX_RETRIES) {
         await sleep(500 * (attempt + 1));

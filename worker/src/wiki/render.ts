@@ -28,6 +28,21 @@ export function renderMarkdown(md: string): string {
     // skip blanks
     if (!line.trim()) { i++; continue; }
 
+    // pass-through wrappers: <div data-lang="..."> and </div> become themselves.
+    // The bilingual renderer wraps each language block in such a div so the
+    // CSS rule keyed off <html lang> can show/hide the right one.
+    var divOpen = line.match(/^<div\s+data-lang="(en|zh|zh-CN|zh-TW)"\s*>\s*$/);
+    if (divOpen) {
+      out.push(`<div data-lang="${divOpen[1]}">`);
+      i++;
+      continue;
+    }
+    if (/^<\/div>\s*$/.test(line)) {
+      out.push("</div>");
+      i++;
+      continue;
+    }
+
     // horizontal rule
     if (/^---+$/.test(line.trim())) { out.push("<hr/>"); i++; continue; }
 

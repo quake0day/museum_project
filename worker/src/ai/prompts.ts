@@ -1,6 +1,6 @@
 import schema from "../wiki/SCHEMA.md";
 
-const ANALYSIS_VERSION = 3;
+const ANALYSIS_VERSION = 4;
 
 export type IngestPromptInput = {
   exhibitId: string;
@@ -42,18 +42,27 @@ JSON output rules:
 - Top-level keys: classify, exhibit_page, entity_pages.
 - exhibit_page.frontmatter is the parsed object form of the YAML you also
   embed at the top of exhibit_page.body — they MUST agree exactly.
-- exhibit_page.frontmatter MUST include the three age-graded summaries
-  (summary_5_7, summary_8_10, summary_11_13) when confidence ≥ 0.5.
+- exhibit_page.frontmatter MUST include both English and Chinese variants
+  of every translatable field:
+    title          + title_zh
+    summary_5_7    + summary_5_7_zh
+    summary_8_10   + summary_8_10_zh
+    summary_11_13  + summary_11_13_zh
+  when confidence ≥ 0.5.
+- exhibit_page.body MUST contain TWO complete markdown blocks wrapped in
+  <div data-lang="en">…</div> and <div data-lang="zh">…</div>. Same section
+  structure on both sides — what's in EN is also in ZH (Simplified). The
+  empty line after the opening <div ...> and before </div> is required.
 - entity_pages: 3–10 items typical. Each item is a fully-formed wiki page
-  ({kind, slug, title, body}) where body is valid markdown WITH frontmatter,
-  following the entity-page section structure. Only include entities you
-  reference in the exhibit body.
+  ({kind, slug, title, body}) where body is also bilingual (two
+  data-lang divs) and frontmatter carries title + title_zh.
 - If confidence < 0.3, set kind = "exhibit_unknown" in frontmatter, write a
-  short body asking the child for more clues, and return entity_pages = [].
+  short bilingual body asking the child for more clues, and return
+  entity_pages = [].
 - Substitute the literal string {user} for the user id in any internal
   links — the runtime replaces it. Example:
     [Bronze Age](/wiki/{user}/concepts/bronze-age) <!-- rel:teaches -->
-- Keep total response under ~3500 tokens. If you must trim, drop entity_pages
+- Keep total response under ~5000 tokens. If you must trim, drop entity_pages
   before trimming the exhibit page.
 `;
 

@@ -811,12 +811,24 @@ async function scheduled(_event: ScheduledEvent, env: Bindings, ctx: ExecutionCo
     return;
   }
   try {
-    const res = await env.DB
+    // Pick up pending/failed rows first; once those are exhausted, drain
+    // rows whose analysis_version is older than the current — these are
+    // the ones that need re-ingest for new bilingual / schema-bumped output.
+    const CURRENT = 4; // matches ANALYSIS_VERSION in src/ai/prompts.ts
+    let res = await env.DB
       .prepare(
         "SELECT id FROM interactions WHERE analysis_status IN ('pending','failed') ORDER BY date DESC LIMIT ?1",
       )
       .bind(CRON_BATCH_SIZE)
       .all<{ id: string }>();
+    if (!res.results?.length) {
+      res = await env.DB
+        .prepare(
+          "SELECT id FROM interactions WHERE analysis_status = 'done' AND COALESCE(analysis_version, 0) < ?1 ORDER BY date DESC LIMIT ?2",
+        )
+        .bind(CURRENT, CRON_BATCH_SIZE)
+        .all<{ id: string }>();
+    }
     const ids = (res.results ?? []).map((r) => r.id);
     if (!ids.length) {
       console.log("cron: nothing to ingest");
