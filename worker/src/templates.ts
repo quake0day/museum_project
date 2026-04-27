@@ -6,7 +6,16 @@ import type { EncyclopediaData } from "./wiki/encyclopedia";
 import { kindLabel, kindRank } from "./wiki/encyclopedia";
 import type { GraphData } from "./wiki/graph";
 import type { Lang } from "./i18n";
-import { t as ti, tx } from "./i18n";
+import { t as ti, tx, linkPath, langPrefix } from "./i18n";
+
+// Common opts every render function passes to layout(). Threading these
+// through (instead of defaulting in layout) is what guarantees nav links
+// point at the right user/language on every page.
+type ChromeOpts = {
+  currentUser?: string;
+  isSignedIn?: boolean;
+  lang?: Lang;
+};
 import { renderMarkdown } from "./wiki/render";
 
 function layout(opts: {
@@ -24,11 +33,13 @@ function layout(opts: {
   // The user pill is rendered server-side when known, otherwise filled in by
   // main.js on page load via /api/me — this lets every render function stay
   // simple while still showing the right state on every page.
-  const wikiHref = opts.currentUser ? `/wiki/${encodeURIComponent(opts.currentUser)}/index` : "/wiki/default/index";
+  const userForLink = opts.currentUser || "chen"; // safe fallback to default tenant
+  const L = (path: string) => linkPath(lang, path);
+  const wikiHref = L(`/wiki/${encodeURIComponent(userForLink)}/index`);
   const userPill = opts.isSignedIn && opts.currentUser
-    ? `<form method="POST" action="/logout" class="user-pill" title="Sign out" data-user-pill>
+    ? `<form method="POST" action="${L("/logout")}" class="user-pill" title="${tx("nav.signout", lang)}" data-user-pill>
         <span class="user-pill-name">@${escapeHtml(opts.currentUser)}</span>
-        <button type="submit" class="user-pill-out" aria-label="Sign out">↩</button>
+        <button type="submit" class="user-pill-out" aria-label="${tx("nav.signout", lang)}">↩</button>
       </form>`
     : `<span class="user-pill-slot" data-user-pill></span>`;
 
@@ -81,19 +92,19 @@ function layout(opts: {
         </span>
       </a>
       <nav class="nav" aria-label="Primary">
-        ${navLink("/", ti("nav.home"), "home")}
+        ${navLink(L("/"), ti("nav.home"), "home")}
         ${navLink(wikiHref, ti("nav.wiki"), "wiki")}
-        ${navLink("/me/timeline", ti("nav.timeline"), "timeline")}
-        ${navLink("/me/map", ti("nav.map"), "map")}
-        ${navLink("/me/graph", ti("nav.graph"), "graph")}
-        ${navLink("/me/quests", ti("nav.quests"), "quests")}
-        ${navLink("/interactions/view", ti("nav.captures"), "list")}
+        ${navLink(L("/me/timeline"), ti("nav.timeline"), "timeline")}
+        ${navLink(L("/me/map"), ti("nav.map"), "map")}
+        ${navLink(L("/me/graph"), ti("nav.graph"), "graph")}
+        ${navLink(L("/me/quests"), ti("nav.quests"), "quests")}
+        ${navLink(L("/interactions/view"), ti("nav.captures"), "list")}
       </nav>
       ${userPill}
       <button class="lang-toggle" type="button" data-lang-toggle title="${tx("lang.toggleAria", lang)}" aria-label="${tx("lang.toggleAria", lang)}">
         ${ti("lang.toggleNext")}
       </button>
-      <a class="nav-icon" href="${opts.currentUser ? `/wiki/${encodeURIComponent(opts.currentUser)}/_search` : "/wiki/chen/_search"}" title="${tx("nav.search", lang)}" aria-label="${tx("nav.search", lang)}">
+      <a class="nav-icon" href="${L(`/wiki/${encodeURIComponent(userForLink)}/_search`)}" title="${tx("nav.search", lang)}" aria-label="${tx("nav.search", lang)}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </a>
       <button class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
@@ -130,6 +141,7 @@ function layout(opts: {
 export function renderStudentHome(opts: { user: string; data: DashboardData; isSignedIn?: boolean; lang?: Lang }): string {
   const { user, data, isSignedIn } = opts;
   const lang: Lang = opts.lang ?? "en";
+  const L = (path: string) => linkPath(lang, path);
   const { totals, recent, inProgress, earnedRecent, nextAdventure } = data;
 
   const hour = new Date().getHours();
@@ -201,7 +213,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
     <div class="container">
       <header class="dash-block-head">
         <h2>${ti("home.recent")}</h2>
-        <a href="/interactions/view" class="muted">${ti("home.allcaptures")}</a>
+        <a href="${L("/interactions/view")}" class="muted">${ti("home.allcaptures")}</a>
       </header>
       <div class="dash-recent-grid">
         ${recent.slice(0, 4).map(recentCard).join("")}
@@ -214,7 +226,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
     <div class="container">
       <header class="dash-block-head">
         <h2>${ti("home.questsActive")}</h2>
-        <a href="/me/quests" class="muted">${ti("home.allquests")}</a>
+        <a href="${L("/me/quests")}" class="muted">${ti("home.allquests")}</a>
       </header>
       <div class="dash-quest-list">
         ${inProgress.map(questBar).join("")}
@@ -227,7 +239,7 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
     <div class="container">
       <header class="dash-block-head">
         <h2>${ti("home.badges")}</h2>
-        <a href="/me/quests" class="muted">${ti("home.allbadges")}</a>
+        <a href="${L("/me/quests")}" class="muted">${ti("home.allbadges")}</a>
       </header>
       <div class="dash-badges">
         ${earnedRecent.map((q) => `<a class="dash-badge" href="/me/quests" title="${escapeHtml(q.description)}">
@@ -245,32 +257,32 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
     <div class="container">
       <header class="dash-block-head"><h2>${ti("home.explore")}</h2></header>
       <div class="dash-explore-grid">
-        <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/index">
+        <a class="dash-explore" href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">
           <span class="dash-explore-emoji">📚</span>
           <strong>${ti("home.explore.all")}</strong>
           <small>${ti("home.explore.allDesc")}</small>
         </a>
-        <a class="dash-explore" href="/me/timeline">
+        <a class="dash-explore" href="${L("/me/timeline")}">
           <span class="dash-explore-emoji">⏳</span>
           <strong>${ti("home.explore.timeline")}</strong>
           <small>${ti("home.explore.timelineDesc")}</small>
         </a>
-        <a class="dash-explore" href="/me/map">
+        <a class="dash-explore" href="${L("/me/map")}">
           <span class="dash-explore-emoji">🗺️</span>
           <strong>${ti("home.explore.map")}</strong>
           <small>${ti("home.explore.mapDesc")}</small>
         </a>
-        <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/_search">
+        <a class="dash-explore" href="${L(`/wiki/${encodeURIComponent(user)}/_search`)}">
           <span class="dash-explore-emoji">🔍</span>
           <strong>${ti("home.explore.search")}</strong>
           <small>${ti("home.explore.searchDesc")}</small>
         </a>
-        <a class="dash-explore" href="/wiki/${encodeURIComponent(user)}/_ask">
+        <a class="dash-explore" href="${L(`/wiki/${encodeURIComponent(user)}/_ask`)}">
           <span class="dash-explore-emoji">💬</span>
           <strong>${ti("home.explore.ask")}</strong>
           <small>${ti("home.explore.askDesc")}</small>
         </a>
-        <a class="dash-explore" href="/me/quests">
+        <a class="dash-explore" href="${L("/me/quests")}">
           <span class="dash-explore-emoji">🏅</span>
           <strong>${ti("home.explore.quests")}</strong>
           <small>${ti("home.explore.questsDesc")}</small>
@@ -412,7 +424,7 @@ const DOMAIN_EMOJI: Record<string, string> = {
   culture: "🌍",
 };
 
-export function renderHome(data: { stats: Stats }): string {
+export function renderHome(data: { stats: Stats } & ChromeOpts): string {
   const s = data.stats;
   const latest = s.latest_at ? formatDate(s.latest_at) : "—";
   const body = `
@@ -535,6 +547,9 @@ export function renderHome(data: { stats: Stats }): string {
     title: "MuseIQ — Museum Interaction Platform",
     active: "home",
     body,
+    currentUser: data.currentUser,
+    isSignedIn: data.isSignedIn,
+    lang: data.lang,
   });
 }
 
@@ -546,8 +561,14 @@ export function renderList(data: {
   query: string;
   hasPrev: boolean;
   hasNext: boolean;
+  currentUser?: string;
+  isSignedIn?: boolean;
+  lang?: Lang;
 }): string {
   const { interactions, page, totalPages, count, query, hasPrev, hasNext } = data;
+  const lang: Lang = data.lang ?? "en";
+  const userForLink = data.currentUser || "chen";
+  const L = (path: string) => linkPath(lang, path);
 
   const cards = interactions.length
     ? interactions
@@ -561,7 +582,7 @@ export function renderList(data: {
             ? ({ history: "🏺", art: "🎨", science: "🦖", tech: "⚙️", technology: "⚙️", culture: "🌍" }[domain] ?? "")
             : "";
           const wikiHref = it.analysis_status === "done"
-            ? `/wiki/default/exhibits/${encodeURIComponent(it.id)}`
+            ? L(`/wiki/${encodeURIComponent(userForLink)}/exhibits/${encodeURIComponent(it.id)}`)
             : null;
           // When the wiki page exists, the whole card becomes a link to it.
           // Otherwise the lightbox-trigger keeps its zoom-on-click behavior.
@@ -695,6 +716,9 @@ export function renderList(data: {
     title: query ? `"${query}" — Interactions` : "Interactions — MuseIQ",
     active: "list",
     body,
+    currentUser: data.currentUser,
+    isSignedIn: data.isSignedIn,
+    lang,
   });
 }
 
@@ -938,7 +962,7 @@ export function renderAdminList(data: {
   });
 }
 
-export function renderError(message: string): string {
+export function renderError(message: string, chrome: ChromeOpts = {}): string {
   const body = `
   <section class="error-screen">
     <div class="container error-inner">
@@ -948,7 +972,7 @@ export function renderError(message: string): string {
       <a class="btn btn-primary" href="/">← Back home</a>
     </div>
   </section>`;
-  return layout({ title: "Error — MuseIQ", body });
+  return layout({ title: "Error — MuseIQ", body, ...chrome });
 }
 
 // ───────────────────────────── Wiki render ─────────────────────────────
@@ -965,11 +989,16 @@ export function renderWikiPage(opts: {
   inbound?: Array<{ path: string; title: string; kind: string; relation: string | null }>;
   photos?: InboundExhibit[];
   related?: CoOccurrence[];
+  currentUser?: string;
+  isSignedIn?: boolean;
+  lang?: Lang;
 }): string {
   const { user, page, imageSrc } = opts;
   const inbound = opts.inbound ?? [];
   const photos = opts.photos ?? [];
   const related = opts.related ?? [];
+  const lang: Lang = opts.lang ?? "en";
+  const L = (path: string) => linkPath(lang, path);
   let fm: Record<string, unknown> = {};
   try {
     fm = page.frontmatter_json ? JSON.parse(page.frontmatter_json) : {};
@@ -1052,12 +1081,12 @@ export function renderWikiPage(opts: {
 
   const actions = isExhibit ? `
     <div class="wiki-actions" role="toolbar" aria-label="Page actions">
-      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-primary">💬 ${ti("wiki.askButton")}</a>
-      <a href="/wiki/${encodeURIComponent(user)}/_quiz?p=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">📝 ${ti("wiki.quizButton")}</a>
-      <a href="/wiki/${encodeURIComponent(user)}/_compare?a=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">🔀 ${ti("wiki.compareButton")}</a>
+      <a href="${L(`/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}`)}" class="btn btn-primary">💬 ${ti("wiki.askButton")}</a>
+      <a href="${L(`/wiki/${encodeURIComponent(user)}/_quiz?p=${encodeURIComponent(page.path)}`)}" class="btn btn-ghost btn-sm">📝 ${ti("wiki.quizButton")}</a>
+      <a href="${L(`/wiki/${encodeURIComponent(user)}/_compare?a=${encodeURIComponent(page.path)}`)}" class="btn btn-ghost btn-sm">🔀 ${ti("wiki.compareButton")}</a>
     </div>` : `
     <div class="wiki-actions" role="toolbar" aria-label="Page actions">
-      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">💬 ${ti("wiki.askButton")}</a>
+      <a href="${L(`/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}`)}" class="btn btn-ghost btn-sm">💬 ${ti("wiki.askButton")}</a>
     </div>`;
 
   // Place pages get an inline mini-map. Pulls lat/lon from frontmatter if
@@ -1105,7 +1134,7 @@ export function renderWikiPage(opts: {
       <h3>${ti("wiki.oftenWith")} <span class="muted">— ${ti("wiki.inYourCaptures")}</span></h3>
       <div class="wiki-related-row">
         ${related.map((r) => {
-          const href = `/wiki/${encodeURIComponent(user)}/${r.path.split("/").map(encodeURIComponent).join("/")}`;
+          const href = L(`/wiki/${encodeURIComponent(user)}/${r.path.split("/").map(encodeURIComponent).join("/")}`);
           return `<a class="wiki-related-chip" href="${href}">
             <span class="wiki-related-kind">${escapeHtml(r.kind)}</span>
             <strong>${escapeHtml(r.title)}</strong>
@@ -1122,7 +1151,7 @@ export function renderWikiPage(opts: {
       <h3>${ti("wiki.whereSeen")} <span class="muted">(${inbound.length})</span></h3>
       <ul>
         ${inbound.map((l) => {
-          const href = `/wiki/${encodeURIComponent(user)}/${l.path.split("/").map(encodeURIComponent).join("/")}`;
+          const href = L(`/wiki/${encodeURIComponent(user)}/${l.path.split("/").map(encodeURIComponent).join("/")}`);
           const rel = l.relation ? `<span class="rel-tag">${escapeHtml(l.relation)}</span>` : "";
           return `<li><a href="${href}">${escapeHtml(l.title)}</a> <span class="muted">· ${escapeHtml(l.kind)}</span>${rel}</li>`;
         }).join("")}
@@ -1149,7 +1178,7 @@ export function renderWikiPage(opts: {
       <div class="wiki-gallery-grid" data-gallery-grid>
         ${photos.map((p, i) => {
           const src = "/media/" + p.image.split("/").map(encodeURIComponent).join("/");
-          const href = `/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(p.exhibit_id)}`;
+          const href = L(`/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(p.exhibit_id)}`);
           const dom = p.primary_domain ?? "";
           const tip = (p.title || "").trim();
           return `<a class="wiki-thumb${i >= GALLERY_INITIAL ? " is-extra" : ""} domain-${escapeHtml(dom)}"
@@ -1180,7 +1209,7 @@ export function renderWikiPage(opts: {
     <div class="wiki-hero">
       <div class="container wiki-container">
         <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
-          <a href="/wiki/${encodeURIComponent(user)}/index">${escapeHtml(user)}'s wiki</a>
+          <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
           <span aria-hidden="true">›</span>
           <span>${escapeHtml(page.kind.replace("_", " "))}</span>
         </nav>
@@ -1587,7 +1616,7 @@ export function renderWikiPage(opts: {
     });
   })();
   </script>`;
-  return layout({ title: `${page.title} — MuseIQ Wiki`, body });
+  return layout({ title: `${page.title} — MuseIQ Wiki`, body, currentUser: opts.currentUser ?? user, isSignedIn: opts.isSignedIn, lang });
 }
 
 // Pull a leading "> ..." block from the body so we can hoist it into the hero.
@@ -1619,7 +1648,7 @@ function stripLeadingHeading(md: string, title: string): string {
 export function renderEncyclopediaIndex(opts: {
   user: string;
   data: EncyclopediaData;
-}): string {
+} & ChromeOpts): string {
   const { user, data } = opts;
   const wikiPath = (p: string) => `/wiki/${encodeURIComponent(user)}/${p.split("/").map(encodeURIComponent).join("/")}`;
 
@@ -1816,7 +1845,7 @@ export function renderEncyclopediaIndex(opts: {
       .enc-kinds { grid-template-columns: repeat(3, 1fr); }
     }
   </style>`;
-  return layout({ title: "Wiki index — MuseIQ", active: "wiki", body });
+  return layout({ title: "Wiki index — MuseIQ", active: "wiki", body, currentUser: opts.currentUser ?? user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 export function renderWikiSyntheticPage(opts: {
@@ -1825,7 +1854,7 @@ export function renderWikiSyntheticPage(opts: {
   kind: "index" | "log";
   title: string;
   body: string;
-}): string {
+} & ChromeOpts): string {
   const { user, kind, title, body } = opts;
   const html = renderMarkdown(body);
   const pageBody = `
@@ -1851,14 +1880,14 @@ export function renderWikiSyntheticPage(opts: {
     .wiki-body ul li { margin: 0; }
     .wiki-body a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
   </style>`;
-  return layout({ title: `${title} — MuseIQ`, body: pageBody });
+  return layout({ title: `${title} — MuseIQ`, body: pageBody, currentUser: opts.currentUser ?? user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 export function renderWikiSearch(opts: {
   user: string;
   query: string;
   hits: WikiSearchHit[];
-}): string {
+} & ChromeOpts): string {
   const { user, query, hits } = opts;
   const results = hits.length
     ? `<ul class="search-results">${hits
@@ -1903,7 +1932,7 @@ export function renderWikiSearch(opts: {
     .search-results .snippet { margin: .35rem 0 0; font-size: .9rem; color:#475569; line-height:1.4; }
     .search-results mark { background: #fef08a; color:inherit; padding: 0 1px; }
   </style>`;
-  return layout({ title: query ? `"${query}" — Wiki search` : "Wiki search — MuseIQ", body });
+  return layout({ title: query ? `"${query}" — Wiki search` : "Wiki search — MuseIQ", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 function sanitizeSnippet(s: string): string {
@@ -1918,7 +1947,7 @@ export function renderCompare(opts: {
   pathB: string;
   result: { titleA: string; titleB: string; answerMd: string } | null;
   error: string | null;
-}): string {
+} & ChromeOpts): string {
   const { user, pathA, pathB, result, error } = opts;
   const linkA = pathA ? `/wiki/${encodeURIComponent(user)}/${pathA.split("/").map(encodeURIComponent).join("/")}` : "";
   const linkB = pathB ? `/wiki/${encodeURIComponent(user)}/${pathB.split("/").map(encodeURIComponent).join("/")}` : "";
@@ -1954,14 +1983,14 @@ export function renderCompare(opts: {
     .cmp-heads { display:flex; gap: 2rem; flex-wrap: wrap; padding: .75rem 1rem; background: rgba(0,0,0,.03); border-radius: .5rem; margin: 1rem 0; }
     .ask-answer { padding: 1rem 1.25rem; border:1px solid var(--border,#e5e7eb); border-radius: .8rem; background: var(--bg-elev,#fff); }
   </style>`;
-  return layout({ title: "Compare — MuseIQ", body });
+  return layout({ title: "Compare — MuseIQ", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 export function renderQuiz(opts: {
   user: string;
   path: string;
   quiz: { pageTitle: string; pagePath: string; questions: Array<{ prompt: string; type: "mcq" | "free"; choices?: string[]; correct_index?: number; hint?: string; explanation: string }> };
-}): string {
+} & ChromeOpts): string {
   const { user, path, quiz } = opts;
   const pageHref = `/wiki/${encodeURIComponent(user)}/${quiz.pagePath.split("/").map(encodeURIComponent).join("/")}`;
   const items = quiz.questions.map((q, i) => {
@@ -2065,7 +2094,7 @@ export function renderQuiz(opts: {
     });
   })();
   </script>`;
-  return layout({ title: `Quiz: ${quiz.pageTitle} — MuseIQ`, body });
+  return layout({ title: `Quiz: ${quiz.pageTitle} — MuseIQ`, body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 export function renderWikiAsk(opts: {
@@ -2074,7 +2103,7 @@ export function renderWikiAsk(opts: {
   contextPath?: string;
   answer: { answerMd: string; citations: Array<{ path: string; title: string; kind: string }>; shortlistedPaths: string[] } | null;
   error: string | null;
-}): string {
+} & ChromeOpts): string {
   const { user, question, contextPath, answer, error } = opts;
   const answerHtml = answer ? renderMarkdown(answer.answerMd) : "";
   const citationsHtml = answer && answer.citations.length
@@ -2119,13 +2148,13 @@ export function renderWikiAsk(opts: {
     .ask-cites h3 { margin: 0 0 .4rem; font-size: .9rem; }
     .ask-cites ul { padding-left: 1.2rem; margin: 0; }
   </style>`;
-  return layout({ title: question ? `${question} — Wiki ask` : "Ask the wiki", body });
+  return layout({ title: question ? `${question} — Wiki ask` : "Ask the wiki", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 export function renderQuests(opts: {
   user: string;
   quests: Array<{ id: string; title: string; description: string; emoji: string; current: number; target: number; hint?: string; completed: boolean; earnedAt?: string }>;
-}): string {
+} & ChromeOpts): string {
   const { quests } = opts;
   const earned = quests.filter((q) => q.earnedAt).length;
   const inProgress = quests.filter((q) => !q.earnedAt && q.current > 0);
@@ -2179,13 +2208,13 @@ export function renderQuests(opts: {
     .quest-bar-fill { height: 100%; background: linear-gradient(90deg,#0ea5e9,#22d3ee); border-radius: 999px; transition: width .3s ease; }
     .quest-progress { margin: .25rem 0 0; font-size: .82rem; color: #334155; }
   </style>`;
-  return layout({ title: "Quests — MuseIQ", body });
+  return layout({ title: "Quests — MuseIQ", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 export function renderKnowledgeGraph(opts: {
   user: string;
   data: GraphData;
-}): string {
+} & ChromeOpts): string {
   const { user, data } = opts;
   const dataJson = JSON.stringify({
     nodes: data.nodes,
@@ -2521,14 +2550,13 @@ export function renderKnowledgeGraph(opts: {
     }
   })();
   </script>`;
-  return layout({ title: "Knowledge graph — MuseIQ", active: "graph", body });
+  return layout({ title: "Knowledge graph — MuseIQ", active: "graph", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 export function renderTimeline(opts: {
   user: string;
   points: Array<{ id: string; title: string; approx_year: number; primary_domain: string | null; child_summary: string | null }>;
-  lang?: Lang;
-}): string {
+} & ChromeOpts): string {
   const { user, points } = opts;
   const lang: Lang = opts.lang ?? "en";
   const data = points.map((p) => ({
@@ -2810,13 +2838,13 @@ export function renderTimeline(opts: {
     }
   })();
   </script>`;
-  return layout({ title: "Timeline — MuseIQ", active: "timeline", body });
+  return layout({ title: "Timeline — MuseIQ", active: "timeline", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang });
 }
 
 export function renderMap(opts: {
   user: string;
   points: Array<{ id: string; title: string; lat: number; lon: number; primary_domain: string | null; child_summary: string | null }>;
-}): string {
+} & ChromeOpts): string {
   const { user, points } = opts;
   const ptJson = JSON.stringify(points.map((p) => ({
     id: p.id, title: p.title, lat: p.lat, lon: p.lon,
@@ -2865,7 +2893,7 @@ export function renderMap(opts: {
       }
     })();
   </script>`;
-  return layout({ title: "Map — MuseIQ", body });
+  return layout({ title: "Map — MuseIQ", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }
 
 function formatYear(y: number): string {
@@ -2929,7 +2957,7 @@ export function renderLintReport(opts: {
   return layout({ title: "Wiki lint — MuseIQ", body });
 }
 
-export function renderWikiNotFound(opts: { user: string; path: string }): string {
+export function renderWikiNotFound(opts: { user: string; path: string } & ChromeOpts): string {
   const { user, path } = opts;
   const body = `
   <section class="error-screen">
@@ -2940,5 +2968,5 @@ export function renderWikiNotFound(opts: { user: string; path: string }): string
       <p>Try the <a href="/wiki/${encodeURIComponent(user)}/index">wiki index</a>, or capture more exhibits to grow this section.</p>
     </div>
   </section>`;
-  return layout({ title: "Wiki page not found — MuseIQ", body });
+  return layout({ title: "Wiki page not found — MuseIQ", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang: opts.lang });
 }

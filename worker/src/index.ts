@@ -92,6 +92,40 @@ type InteractionRequest = {
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
+// URL-based language routing. Paths starting with /cn, /tw, /en set the
+// language and re-dispatch with the prefix stripped, so all downstream
+// routes (and link helpers) only ever see the canonical (unprefixed) path
+// plus c.var.lang. The cookie is set as a side effect so cross-prefix
+// navigation persists the choice.
+app.use("*", async (c, next) => {
+  const url = new URL(c.req.url);
+  const m = url.pathname.match(/^\/(cn|tw|en)(\/|$)/);
+  if (m) {
+    const langMap: Record<string, Lang> = { cn: "zh-CN", tw: "zh-TW", en: "en" };
+    const newLang = langMap[m[1]];
+    // Persist
+    c.header(
+      "Set-Cookie",
+      `${LANG_COOKIE}=${encodeURIComponent(newLang)}; Secure; SameSite=Lax; Path=/; Max-Age=${LANG_TTL_SECONDS}`,
+    );
+    // Strip the prefix and re-dispatch
+    const stripped = url.pathname.slice(m[0].endsWith("/") ? m[0].length - 1 : m[0].length) || "/";
+    url.pathname = stripped;
+    const newReq = new Request(url.toString(), c.req.raw);
+    // Re-enter the router with the rewritten request. Set the lang here
+    // too so the cookie middleware below picks it up on this dispatch.
+    const child = await app.fetch(newReq, c.env, c.executionCtx);
+    // Pass through the response, but include our Set-Cookie header.
+    const headers = new Headers(child.headers);
+    headers.append(
+      "Set-Cookie",
+      `${LANG_COOKIE}=${encodeURIComponent(newLang)}; Secure; SameSite=Lax; Path=/; Max-Age=${LANG_TTL_SECONDS}`,
+    );
+    return new Response(child.body, { status: child.status, headers });
+  }
+  await next();
+});
+
 // Resolve the current user once per request from the museiq_user cookie.
 // Falls back to DEFAULT_USER_ID so anonymous browsing still sees content.
 app.use("*", async (c, next) => {
@@ -145,17 +179,17 @@ app.get("/", async (c) => {
     }));
   } catch (err) {
     console.error("home error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
 app.get("/about", async (c) => {
   try {
     const stats = await getStats(c.env.DB);
-    return c.html(renderHome({ stats }));
+    return c.html(renderHome({ stats, ...chrome(c) }));
   } catch (err) {
     console.error("about error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -171,7 +205,7 @@ app.get("/login", (c) => {
 
 app.post("/login", async (c) => {
   const secret = c.env.ADMIN_SESSION_SECRET || c.env.ADMIN_PASSWORD || "";
-  if (!secret) return c.html(renderError("Auth secret not configured"), 500);
+  if (!secret) return c.html(renderError("Auth secret not configured", chrome(c)), 500);
   const form = await c.req.formData().catch(() => null);
   const nameRaw = form?.get("name");
   const nextRaw = form?.get("next");
@@ -222,11 +256,12 @@ app.get("/interactions/view", async (c) => {
         query: q,
         hasPrev: page > 1,
         hasNext: page < totalPages,
+        ...chrome(c),
       }),
     );
   } catch (err) {
     console.error("list error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -431,7 +466,7 @@ app.get("/admin/photos", async (c) => {
     );
   } catch (err) {
     console.error("admin list error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -480,7 +515,7 @@ app.post("/admin/delete", async (c) => {
     return c.redirect(`/admin/photos${qs ? `?${qs}` : ""}`, 303);
   } catch (err) {
     console.error("admin delete error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -504,22 +539,22 @@ app.get("/wiki/:user/_compare", async (c) => {
       }
     }
   }
-  return c.html(renderCompare({ user, pathA: a, pathB: b, result, error }));
+  return c.html(renderCompare({ user, pathA: a, pathB: b, result, error, ...chrome(c) }));
 });
 
 // Wiki quiz — register before the catch-all.
 app.get("/wiki/:user/_quiz", async (c) => {
   const user = c.req.param("user");
   const path = c.req.query("p");
-  if (!path) return c.html(renderError("missing ?p=<wiki path>"), 400);
-  if (!c.env.DEEPSEEK_API_KEY) return c.html(renderError("AI provider not configured"), 500);
+  if (!path) return c.html(renderError("missing ?p=<wiki path>", chrome(c)), 400);
+  if (!c.env.DEEPSEEK_API_KEY) return c.html(renderError("AI provider not configured", chrome(c)), 500);
   try {
     const ai = getAiProvider(c.env);
     const quiz = await generateQuiz(ai, c.env.DB, { userId: user, path });
-    return c.html(renderQuiz({ user, path, quiz }));
+    return c.html(renderQuiz({ user, path, quiz, ...chrome(c) }));
   } catch (err) {
     console.error("quiz error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -543,7 +578,7 @@ app.get("/wiki/:user/_ask", async (c) => {
       }
     }
   }
-  return c.html(renderWikiAsk({ user, question, contextPath, answer, error }));
+  return c.html(renderWikiAsk({ user, question, contextPath, answer, error, ...chrome(c) }));
 });
 
 app.post("/api/wiki/:user/ask", async (c) => {
@@ -588,7 +623,7 @@ app.get("/wiki/:user/_search", async (c) => {
       console.error("search error", e);
     }
   }
-  return c.html(renderWikiSearch({ user, query: q, hits }));
+  return c.html(renderWikiSearch({ user, query: q, hits, ...chrome(c) }));
 });
 
 // Convenience: /wiki/:user → index page
@@ -605,15 +640,15 @@ app.get("/wiki/:user/*", async (c) => {
     // Special live-rendered views.
     if (path === "index") {
       const enc = await buildEncyclopedia(c.env.DB, user);
-      return c.html(renderEncyclopediaIndex({ user, data: enc }));
+      return c.html(renderEncyclopediaIndex({ user, data: enc, ...chrome(c) }));
     }
     if (path === "log") {
       const built = await buildLogPage(c.env.DB, user);
-      return c.html(renderWikiSyntheticPage({ user, path, kind: "log", title: built.title, body: built.body }));
+      return c.html(renderWikiSyntheticPage({ user, path, kind: "log", title: built.title, body: built.body, ...chrome(c) }));
     }
     const page = await getWikiPage(c.env.DB, user, path);
     if (!page) {
-      return c.html(renderWikiNotFound({ user, path }), 404);
+      return c.html(renderWikiNotFound({ user, path, ...chrome(c) }), 404);
     }
     // For exhibit pages, look up the captured image so we can render it.
     let imageSrc: string | null = null;
@@ -632,10 +667,10 @@ app.get("/wiki/:user/*", async (c) => {
           getCoOccurringEntities(c.env.DB, user, path, 12),
         ])
       : [[], [], []];
-    return c.html(renderWikiPage({ user, page, imageSrc, inbound, photos, related }));
+    return c.html(renderWikiPage({ user, page, imageSrc, inbound, photos, related, ...chrome(c) }));
   } catch (err) {
     console.error("wiki render error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -645,10 +680,10 @@ app.get("/me/timeline", async (c) => {
   const user = c.var.currentUser;
   try {
     const points = await getTimelinePoints(c.env.DB, user);
-    return c.html(renderTimeline({ user, points }));
+    return c.html(renderTimeline({ user, points, ...chrome(c) }));
   } catch (err) {
     console.error("timeline error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -656,10 +691,10 @@ app.get("/me/graph", async (c) => {
   const user = c.var.currentUser;
   try {
     const data = await buildKnowledgeGraph(c.env.DB, user, { maxNodes: 500 });
-    return c.html(renderKnowledgeGraph({ user, data }));
+    return c.html(renderKnowledgeGraph({ user, data, ...chrome(c) }));
   } catch (err) {
     console.error("graph error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -667,10 +702,10 @@ app.get("/me/quests", async (c) => {
   const user = c.var.currentUser;
   try {
     const quests = await evaluateQuests(c.env.DB, user);
-    return c.html(renderQuests({ user, quests }));
+    return c.html(renderQuests({ user, quests, ...chrome(c) }));
   } catch (err) {
     console.error("quests error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -678,10 +713,10 @@ app.get("/me/map", async (c) => {
   const user = c.var.currentUser;
   try {
     const points = await getMapPoints(c.env.DB, user);
-    return c.html(renderMap({ user, points }));
+    return c.html(renderMap({ user, points, ...chrome(c) }));
   } catch (err) {
     console.error("map error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -706,7 +741,7 @@ app.post("/admin/ingest/:id", async (c) => {
         .bind(id, errMsg(err).slice(0, 800), new Date().toISOString())
         .run();
     } catch { /* swallow */ }
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -718,7 +753,7 @@ app.get("/admin/lint/:user", async (c) => {
     return c.html(renderLintReport({ user, findings }));
   } catch (err) {
     console.error("lint error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -741,7 +776,7 @@ app.post("/admin/ingest-all-pending", async (c) => {
     return c.html(renderError(`Queued ${ids.length} items for AI ingest. Refresh /admin/photos to watch status chips flip from pending → running → done. Estimated ~${Math.ceil(ids.length * 4 / 60)} min.`), 200);
   } catch (err) {
     console.error("ingest-all error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -782,7 +817,7 @@ app.post("/admin/ingest-batch", async (c) => {
     return c.redirect(`/admin/photos${qs ? `?${qs}` : ""}`, 303);
   } catch (err) {
     console.error("admin batch error", err);
-    return c.html(renderError(errMsg(err)), 500);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
 
@@ -865,6 +900,12 @@ function errMsg(e: unknown): string {
 
 function defaultUserId(env: Bindings): string {
   return env.DEFAULT_USER_ID || "default";
+}
+
+// Pull the per-request chrome opts every renderXXX wants so its layout()
+// gets the right user / language / signed-in indicator on every page.
+function chrome(c: { var: Variables }): { currentUser: string; isSignedIn: boolean; lang: Lang } {
+  return { currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang };
 }
 
 async function runSingleIngest(env: Bindings, id: string): Promise<void> {

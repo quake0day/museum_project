@@ -19,6 +19,26 @@ export const NEXT_LANG: Record<Lang, Lang> = {
   "zh-TW": "en",
 };
 
+// URL prefix for each lang. EN has no prefix (/), CN uses /cn, TW uses /tw.
+// Used both for routing (middleware strips the prefix and sets lang) and
+// for emitting internal links so they preserve the active language.
+export function langPrefix(lang: Lang): string {
+  if (lang === "zh-CN") return "/cn";
+  if (lang === "zh-TW") return "/tw";
+  return "";
+}
+
+// Build an internal link path that carries the active language. `path` must
+// start with "/". Examples:
+//   linkPath("en",    "/wiki/chen/index") → "/wiki/chen/index"
+//   linkPath("zh-CN", "/wiki/chen/index") → "/cn/wiki/chen/index"
+export function linkPath(lang: Lang, path: string): string {
+  if (!path.startsWith("/")) path = "/" + path;
+  // Don't double-prefix if path already starts with /cn/tw/en
+  if (/^\/(cn|tw|en)(\/|$)/.test(path)) return path;
+  return langPrefix(lang) + path;
+}
+
 type Entry = { en: string; "zh-CN": string; "zh-TW": string };
 
 const TABLE: Record<string, Entry> = {

@@ -27,24 +27,23 @@
   });
 
   // ───────────── Language toggle ─────────────
-  // Cycles EN → 简 (zh-CN) → 繁 (zh-TW) → EN. Flips <html lang> instantly
-  // + persists via the museiq_lang cookie. CSS hides mismatched-language
-  // elements via [data-lang] selectors.
+  // Cycles EN → 简 (zh-CN) → 繁 (zh-TW) → EN. Navigates to the same page
+  // under the new language prefix (/cn or /tw, or no prefix for en) so the
+  // URL itself reflects the choice. Cookie is set server-side as a side
+  // effect of visiting the prefixed URL, so anonymous bookmarks still
+  // persist the lang.
   const LANG_CYCLE = { 'en': 'zh-CN', 'zh-CN': 'zh-TW', 'zh-TW': 'en' };
+  const LANG_PREFIX = { 'en': '', 'zh-CN': '/cn', 'zh-TW': '/tw' };
+  const PREFIX_RE = /^\/(cn|tw|en)(?=\/|$)/;
   const langBtn = document.querySelector('[data-lang-toggle]');
   if (langBtn) {
     langBtn.addEventListener('click', () => {
-      const html = document.documentElement;
-      const cur = html.getAttribute('lang');
+      const cur = document.documentElement.getAttribute('lang') || 'en';
       const next = LANG_CYCLE[cur] || 'zh-CN';
-      html.setAttribute('lang', next);
-      // fire-and-forget: server cookie persists the choice for next visit
-      fetch('/api/lang', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ lang: next }),
-      }).catch(() => {});
+      // Compute the prefixed version of the current URL
+      const path = location.pathname.replace(PREFIX_RE, '') || '/';
+      const newPath = (LANG_PREFIX[next] || '') + (path === '/' ? '/' : path);
+      location.assign(newPath + location.search + location.hash);
     });
   }
 
