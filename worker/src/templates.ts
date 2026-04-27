@@ -58,7 +58,7 @@ function layout(opts: {
       try {
         var m = document.cookie.match(/(?:^|;\s*)museiq_lang=([^;]+)/);
         var lang = m ? decodeURIComponent(m[1]) : 'en';
-        if (lang !== 'en' && lang !== 'zh') lang = 'en';
+        if (lang !== 'en' && lang !== 'zh-CN' && lang !== 'zh-TW') lang = 'en';
         document.documentElement.setAttribute('lang', lang);
       } catch (_) {}
     })();
@@ -90,8 +90,8 @@ function layout(opts: {
         ${navLink("/interactions/view", ti("nav.captures"), "list")}
       </nav>
       ${userPill}
-      <button class="lang-toggle" type="button" data-lang-toggle title="${tx("lang.tooltip." + lang as any, lang)}" aria-label="Toggle language">
-        <span data-lang="en">中文</span><span data-lang="zh">EN</span>
+      <button class="lang-toggle" type="button" data-lang-toggle title="${tx("lang.toggleAria", lang)}" aria-label="${tx("lang.toggleAria", lang)}">
+        ${ti("lang.toggleNext")}
       </button>
       <a class="nav-icon" href="${opts.currentUser ? `/wiki/${encodeURIComponent(opts.currentUser)}/_search` : "/wiki/chen/_search"}" title="${tx("nav.search", lang)}" aria-label="${tx("nav.search", lang)}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -349,17 +349,17 @@ export function renderLogin(opts: {
   const body = `
   <section class="login-screen">
     <div class="container login-inner">
-      <p class="eyebrow">Welcome to MuseIQ</p>
-      <h1>Who are you?</h1>
-      <p class="muted">Type your name to enter your personal museum wiki. No password needed — your name is your space.</p>
+      <p class="eyebrow">${ti("login.eyebrow")}</p>
+      <h1>${ti("login.title")}</h1>
+      <p class="muted">${ti("login.subtitle")}</p>
       ${error ? `<p class="login-error">${escapeHtml(error)}</p>` : ""}
       <form method="POST" action="/login" class="login-form">
         <input type="hidden" name="next" value="${escapeHtml(safeNext)}" />
-        <label for="login-name" class="login-label">Your name</label>
-        <input id="login-name" type="text" name="name" placeholder="e.g. Chen" autofocus required maxlength="32" autocomplete="username" />
-        <button class="btn btn-primary" type="submit">Enter →</button>
+        <label for="login-name" class="login-label">${ti("login.label")}</label>
+        <input id="login-name" type="text" name="name" placeholder="${tx("login.placeholder", "en")}" autofocus required maxlength="32" autocomplete="username" />
+        <button class="btn btn-primary" type="submit">${ti("login.submit")}</button>
       </form>
-      <p class="muted login-hint">Names are case-insensitive and converted to a slug. "Si Chen" and "Chen" are different spaces; "Chen" and "chen" are the same.</p>
+      <p class="muted login-hint">${ti("login.hint")}</p>
     </div>
   </section>
   <style>
@@ -597,11 +597,13 @@ export function renderList(data: {
             <path d="M22 14V8h20v6"/>
           </svg>
         </div>
-        <h3>${query ? "No matching interactions" : "No interactions yet"}</h3>
-        <p>${
-          query
-            ? `Nothing matches "${escapeHtml(query)}". Try a different keyword.`
-            : "Once the iOS app submits interactions, they will appear here."
+        <h3>${query
+          ? `<span data-lang="en">No matching interactions</span><span data-lang="zh-CN">没有匹配的拍摄记录</span><span data-lang="zh-TW">沒有符合的拍攝紀錄</span>`
+          : ti("captures.empty")
+        }</h3>
+        <p>${query
+          ? `<span data-lang="en">Nothing matches "${escapeHtml(query)}". Try a different keyword.</span><span data-lang="zh-CN">没有匹配「${escapeHtml(query)}」的内容。换个关键词试试。</span><span data-lang="zh-TW">沒有符合「${escapeHtml(query)}」的內容。換個關鍵字試試。</span>`
+          : ti("captures.emptyHint")
         }</p>
       </div>`;
 
@@ -621,8 +623,8 @@ export function renderList(data: {
       <nav class="pagination" aria-label="Pagination">
         ${
           hasPrev
-            ? `<a href="${qp(page - 1)}" class="page-link" rel="prev">← Prev</a>`
-            : `<span class="page-link disabled">← Prev</span>`
+            ? `<a href="${qp(page - 1)}" class="page-link" rel="prev"><span data-lang="en">← Prev</span><span data-lang="zh-CN">← 上一页</span><span data-lang="zh-TW">← 上一頁</span></a>`
+            : `<span class="page-link disabled"><span data-lang="en">← Prev</span><span data-lang="zh-CN">← 上一页</span><span data-lang="zh-TW">← 上一頁</span></span>`
         }
         ${
           start > 1
@@ -643,8 +645,8 @@ export function renderList(data: {
         }
         ${
           hasNext
-            ? `<a href="${qp(page + 1)}" class="page-link" rel="next">Next →</a>`
-            : `<span class="page-link disabled">Next →</span>`
+            ? `<a href="${qp(page + 1)}" class="page-link" rel="next"><span data-lang="en">Next →</span><span data-lang="zh-CN">下一页 →</span><span data-lang="zh-TW">下一頁 →</span></a>`
+            : `<span class="page-link disabled"><span data-lang="en">Next →</span><span data-lang="zh-CN">下一页 →</span><span data-lang="zh-TW">下一頁 →</span></span>`
         }
       </nav>`
       : "";
@@ -654,10 +656,10 @@ export function renderList(data: {
     <div class="container">
       <header class="list-header">
         <div class="list-title">
-          <p class="eyebrow">Archive</p>
-          <h1>Interactions</h1>
-          <p class="muted">${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}${
-            query ? ` matching "${escapeHtml(query)}"` : ""
+          <p class="eyebrow">${ti("captures.eyebrow")}</p>
+          <h1>${ti("captures.title")}</h1>
+          <p class="muted">${count.toLocaleString()} ${count === 1 ? ti("captures.entry") : ti("captures.entries")}${
+            query ? ` <span data-lang="en">matching "${escapeHtml(query)}"</span><span data-lang="zh-CN">匹配「${escapeHtml(query)}」</span><span data-lang="zh-TW">符合「${escapeHtml(query)}」</span>` : ""
           }.</p>
         </div>
         <form class="search" method="get" action="/interactions/view" role="search">
@@ -668,7 +670,7 @@ export function renderList(data: {
               ? `<a class="search-clear" href="/interactions/view" aria-label="Clear search">×</a>`
               : ""
           }
-          <button type="submit" class="btn btn-primary btn-sm">Search</button>
+          <button type="submit" class="btn btn-primary btn-sm">${ti("captures.search")}</button>
         </form>
       </header>
 
@@ -793,11 +795,11 @@ export function renderAdminList(data: {
     totalPages > 1
       ? `
       <nav class="pagination" aria-label="Pagination">
-        ${hasPrev ? `<a href="${qp(page - 1)}" class="page-link" rel="prev">← Prev</a>` : `<span class="page-link disabled">← Prev</span>`}
+        ${hasPrev ? `<a href="${qp(page - 1)}" class="page-link" rel="prev"><span data-lang="en">← Prev</span><span data-lang="zh-CN">← 上一页</span><span data-lang="zh-TW">← 上一頁</span></a>` : `<span class="page-link disabled"><span data-lang="en">← Prev</span><span data-lang="zh-CN">← 上一页</span><span data-lang="zh-TW">← 上一頁</span></span>`}
         ${start > 1 ? `<a href="${qp(1)}" class="page-link">1</a>${start > 2 ? '<span class="gap" aria-hidden="true">…</span>' : ""}` : ""}
         ${windowPages.map((i) => i === page ? `<span class="page-link active" aria-current="page">${i}</span>` : `<a href="${qp(i)}" class="page-link">${i}</a>`).join("")}
         ${end < totalPages ? `${end < totalPages - 1 ? '<span class="gap" aria-hidden="true">…</span>' : ""}<a href="${qp(totalPages)}" class="page-link">${totalPages}</a>` : ""}
-        ${hasNext ? `<a href="${qp(page + 1)}" class="page-link" rel="next">Next →</a>` : `<span class="page-link disabled">Next →</span>`}
+        ${hasNext ? `<a href="${qp(page + 1)}" class="page-link" rel="next"><span data-lang="en">Next →</span><span data-lang="zh-CN">下一页 →</span><span data-lang="zh-TW">下一頁 →</span></a>` : `<span class="page-link disabled"><span data-lang="en">Next →</span><span data-lang="zh-CN">下一页 →</span><span data-lang="zh-TW">下一頁 →</span></span>`}
       </nav>`
       : "";
 
@@ -1029,19 +1031,19 @@ export function renderWikiPage(opts: {
   const ageBlock = hasAgeSummaries ? `
     <p class="wiki-summary" data-summary-host>${escapeHtml(available.find((b) => b.key === defaultBand)?.text ?? "")}</p>
     <div class="wiki-age-row" data-age-toggle>
-      <span class="wiki-age-label">Reading level</span>
+      <span class="wiki-age-label">${ti("wiki.readingLevel")}</span>
       ${available.map((b) => `<button type="button" data-band="${b.key}" class="wiki-age-tab${b.key === defaultBand ? " is-active" : ""}" aria-selected="${b.key === defaultBand}">${b.label}</button>`).join("")}
       ${available.map((b) => `<template data-band-text="${b.key}">${escapeHtml(b.text ?? "")}</template>`).join("")}
     </div>` : (heroQuote ? `<p class="wiki-summary">${escapeHtml(heroQuote)}</p>` : "");
 
   const actions = isExhibit ? `
     <div class="wiki-actions" role="toolbar" aria-label="Page actions">
-      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-primary">💬 Ask the wiki</a>
-      <a href="/wiki/${encodeURIComponent(user)}/_quiz?p=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">📝 Quiz</a>
-      <a href="/wiki/${encodeURIComponent(user)}/_compare?a=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">🔀 Compare</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-primary">💬 ${ti("wiki.askButton")}</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_quiz?p=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">📝 ${ti("wiki.quizButton")}</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_compare?a=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">🔀 ${ti("wiki.compareButton")}</a>
     </div>` : `
     <div class="wiki-actions" role="toolbar" aria-label="Page actions">
-      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">💬 Ask the wiki</a>
+      <a href="/wiki/${encodeURIComponent(user)}/_ask?about=${encodeURIComponent(page.path)}" class="btn btn-ghost btn-sm">💬 ${ti("wiki.askButton")}</a>
     </div>`;
 
   // Place pages get an inline mini-map. Pulls lat/lon from frontmatter if
@@ -1058,7 +1060,7 @@ export function renderWikiPage(opts: {
     if (fmLat !== null && fmLon !== null) {
       placeMapHtml = `
       <section class="wiki-map" aria-label="Where this is on the map">
-        <h3>📍 On the map</h3>
+        <h3>📍 ${ti("wiki.onMap")}</h3>
         <div id="wiki-place-map" data-lat="${fmLat}" data-lon="${fmLon}" data-title="${escapeHtml(page.title)}"></div>
       </section>
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
@@ -1086,7 +1088,7 @@ export function renderWikiPage(opts: {
   const relatedHtml = related.length
     ? `
     <aside class="wiki-related" aria-label="Often appears with">
-      <h3>Often appears with <span class="muted">— in your captures</span></h3>
+      <h3>${ti("wiki.oftenWith")} <span class="muted">— ${ti("wiki.inYourCaptures")}</span></h3>
       <div class="wiki-related-row">
         ${related.map((r) => {
           const href = `/wiki/${encodeURIComponent(user)}/${r.path.split("/").map(encodeURIComponent).join("/")}`;
@@ -1103,7 +1105,7 @@ export function renderWikiPage(opts: {
   const inboundHtml = inbound.length
     ? `
     <aside class="wiki-inbound" aria-label="Pages that link here">
-      <h3>Where you've seen it <span class="muted">(${inbound.length})</span></h3>
+      <h3>${ti("wiki.whereSeen")} <span class="muted">(${inbound.length})</span></h3>
       <ul>
         ${inbound.map((l) => {
           const href = `/wiki/${encodeURIComponent(user)}/${l.path.split("/").map(encodeURIComponent).join("/")}`;
@@ -1121,9 +1123,13 @@ export function renderWikiPage(opts: {
     ? `
     <section class="wiki-gallery" aria-label="Photos from your captures">
       <header class="wiki-gallery-head">
-        <h3>📸 Photos from your captures <span class="muted">(${photos.length})</span></h3>
+        <h3>📸 ${ti("wiki.photos")} <span class="muted">(${photos.length})</span></h3>
         ${photos.length > GALLERY_INITIAL
-          ? `<button type="button" class="btn btn-ghost btn-sm" data-gallery-toggle>Show all ${photos.length}</button>`
+          ? `<button type="button" class="btn btn-ghost btn-sm" data-gallery-toggle>
+              <span data-lang="en">Show all ${photos.length}</span>
+              <span data-lang="zh-CN">显示全部 ${photos.length}</span>
+              <span data-lang="zh-TW">顯示全部 ${photos.length}</span>
+            </button>`
           : ""}
       </header>
       <div class="wiki-gallery-grid" data-gallery-grid>
@@ -1185,8 +1191,8 @@ export function renderWikiPage(opts: {
       ${relatedHtml}
       ${inboundHtml}
       <details class="wiki-meta">
-        <summary>Page info <span class="muted">(for grown-ups)</span></summary>
-        <p class="muted">Last updated by AI · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} outbound link${page.outbound_links === 1 ? "" : "s"} · ${page.inbound_links} inbound link${page.inbound_links === 1 ? "" : "s"} · path <code>${escapeHtml(page.path)}</code></p>
+        <summary>${ti("wiki.pageInfo")} <span class="muted">${ti("wiki.forGrownups")}</span></summary>
+        <p class="muted">${ti("wiki.lastUpdated")} · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} ${ti("wiki.outboundLinks")} · ${page.inbound_links} ${ti("wiki.inboundLinks")} · path <code>${escapeHtml(page.path)}</code></p>
       </details>
     </div>
   </section>
@@ -1538,7 +1544,13 @@ export function renderWikiPage(opts: {
       grid.querySelectorAll('.wiki-thumb.is-extra').forEach(function (el) {
         el.hidden = !expanded;
       });
-      btn.textContent = expanded ? 'Show fewer' : 'Show all ' + grid.querySelectorAll('.wiki-thumb').length;
+      var lang = document.documentElement.getAttribute('lang');
+      var labels = {
+        'en': expanded ? 'Show fewer' : 'Show all ' + grid.querySelectorAll('.wiki-thumb').length,
+        'zh-CN': expanded ? '收起' : '显示全部 ' + grid.querySelectorAll('.wiki-thumb').length,
+        'zh-TW': expanded ? '收起' : '顯示全部 ' + grid.querySelectorAll('.wiki-thumb').length,
+      };
+      btn.textContent = labels[lang] || labels['en'];
     });
   })();
   </script>`;
@@ -1626,8 +1638,8 @@ export function renderEncyclopediaIndex(opts: {
     <a class="enc-exhibits" href="/interactions/view">
       <div class="enc-exhibits-emoji">📸</div>
       <div class="enc-exhibits-text">
-        <strong>${data.exhibitCount.toLocaleString()} captured exhibit${data.exhibitCount === 1 ? "" : "s"}</strong>
-        <span class="muted">Browse the photos you took at the museum</span>
+        <strong>${data.exhibitCount.toLocaleString()} ${ti("enc.exhibitsTitle")}</strong>
+        <span class="muted">${ti("enc.exhibitsHint")}</span>
       </div>
       <span class="enc-exhibits-arrow" aria-hidden="true">→</span>
     </a>`;
@@ -1636,18 +1648,22 @@ export function renderEncyclopediaIndex(opts: {
   <section class="enc">
     <div class="container enc-container">
       <header class="enc-head">
-        <p class="eyebrow">${escapeHtml(user === "default" ? "Your" : user + "'s")} encyclopedia</p>
-        <h1>Wiki index</h1>
-        <p class="muted">${data.totalPages.toLocaleString()} entry page${data.totalPages === 1 ? "" : "s"}, organized by subject. Click a subject to jump to it.</p>
+        <p class="eyebrow">
+          <span data-lang="en">${escapeHtml(user === "default" ? "Your" : user + "'s")} encyclopedia</span>
+          <span data-lang="zh-CN">${escapeHtml(user)} 的百科全书</span>
+          <span data-lang="zh-TW">${escapeHtml(user)} 的百科全書</span>
+        </p>
+        <h1>${ti("enc.title")}</h1>
+        <p class="muted">${data.totalPages.toLocaleString()} ${ti("enc.lede")}</p>
       </header>
 
       ${exhibitsCard}
 
       ${data.sections.length ? `<nav class="enc-nav" aria-label="Subjects">${navLinks}</nav>` : ""}
 
-      <div class="enc-sections">${sectionHtml || `<p class="muted">No entry pages yet — capture more exhibits and the encyclopedia will grow here.</p>`}</div>
+      <div class="enc-sections">${sectionHtml || `<p class="muted">${ti("enc.empty")}</p>`}</div>
 
-      <p class="muted enc-foot">Last updated ${data.lastUpdated ? escapeHtml(data.lastUpdated.slice(0, 10)) : "—"} · <a href="/wiki/${encodeURIComponent(user)}/log">activity log</a></p>
+      <p class="muted enc-foot">${ti("enc.lastUpdated")} ${data.lastUpdated ? escapeHtml(data.lastUpdated.slice(0, 10)) : "—"} · <a href="/wiki/${encodeURIComponent(user)}/log">${ti("enc.activityLog")}</a></p>
     </div>
   </section>
   <style>
@@ -1823,7 +1839,10 @@ export function renderWikiSearch(opts: {
           </li>`;
         })
         .join("")}</ul>`
-    : `<p class="muted">${query ? `No matches for "${escapeHtml(query)}".` : "Type a query above to search the wiki."}</p>`;
+    : `<p class="muted">${query
+        ? `<span data-lang="en">No matches for "${escapeHtml(query)}".</span><span data-lang="zh-CN">没有匹配「${escapeHtml(query)}」的内容。</span><span data-lang="zh-TW">沒有符合「${escapeHtml(query)}」的內容。</span>`
+        : ti("search.empty")
+      }</p>`;
 
   const body = `
   <section class="wiki">
@@ -1833,7 +1852,7 @@ export function renderWikiSearch(opts: {
         <span aria-hidden="true">›</span>
         <span>search</span>
       </nav>
-      <h1>Search the wiki</h1>
+      <h1>${ti("search.title")}</h1>
       <form method="get" action="/wiki/${encodeURIComponent(user)}/_search" role="search" class="search-form">
         <input type="search" name="q" value="${escapeHtml(query)}" placeholder="bronze, ritual, perspective…" autofocus />
         <button class="btn btn-primary btn-sm" type="submit">Search</button>
@@ -1878,11 +1897,11 @@ export function renderCompare(opts: {
         <span aria-hidden="true">›</span>
         <span>compare</span>
       </nav>
-      <h1>Compare two pages</h1>
+      <h1>${ti("compare.title")}</h1>
       <form method="get" action="/wiki/${encodeURIComponent(user)}/_compare" class="ask-form" style="flex-direction:column;">
-        <label>Page A path<input type="text" name="a" value="${escapeHtml(pathA)}" placeholder="exhibits/abc-123" /></label>
-        <label>Page B path<input type="text" name="b" value="${escapeHtml(pathB)}" placeholder="exhibits/def-456" /></label>
-        <button class="btn btn-primary" type="submit" style="align-self:flex-start;">Compare</button>
+        <label>${ti("compare.pathA")}<input type="text" name="a" value="${escapeHtml(pathA)}" placeholder="exhibits/abc-123" /></label>
+        <label>${ti("compare.pathB")}<input type="text" name="b" value="${escapeHtml(pathB)}" placeholder="exhibits/def-456" /></label>
+        <button class="btn btn-primary" type="submit" style="align-self:flex-start;">${ti("compare.submit")}</button>
       </form>
       ${error ? `<div class="ask-error">${escapeHtml(error)}</div>` : ""}
       ${result ? `
@@ -1947,9 +1966,9 @@ export function renderQuiz(opts: {
       <h1>${escapeHtml(quiz.pageTitle)}</h1>
       <p class="muted">${quiz.questions.length} questions · click an answer to see how you did.</p>
       <ol class="quiz-list">${items}</ol>
-      <button id="quiz-grade" class="btn btn-primary" type="button">Grade my quiz</button>
+      <button id="quiz-grade" class="btn btn-primary" type="button">${ti("quiz.grade")}</button>
       <p id="quiz-score" class="muted" style="margin-top:.75rem;"></p>
-      <p style="margin-top:1rem;"><a href="${pageHref}">← Back to page</a></p>
+      <p style="margin-top:1rem;"><a href="${pageHref}">${ti("quiz.back")}</a></p>
     </div>
   </section>
   <style>
@@ -2003,7 +2022,13 @@ export function renderQuiz(opts: {
       });
       grade.disabled = true;
       grade.style.opacity = '.55';
-      scoreEl.textContent = 'You got ' + right + ' of ' + total + ' multiple-choice questions right.';
+      var lang = document.documentElement.getAttribute('lang');
+      var msg = {
+        'en': 'You got ' + right + ' of ' + total + ' multiple-choice questions right.',
+        'zh-CN': '你答对了 ' + right + ' / ' + total + ' 道选择题。',
+        'zh-TW': '你答對了 ' + right + ' / ' + total + ' 道選擇題。',
+      };
+      scoreEl.textContent = msg[lang] || msg['en'];
     });
   })();
   </script>`;
@@ -2021,7 +2046,7 @@ export function renderWikiAsk(opts: {
   const answerHtml = answer ? renderMarkdown(answer.answerMd) : "";
   const citationsHtml = answer && answer.citations.length
     ? `<aside class="ask-cites">
-        <h3>Pages I read</h3>
+        <h3>${ti("ask.pagesRead")}</h3>
         <ul>
           ${answer.citations.map((c) => {
             const href = `/wiki/${encodeURIComponent(user)}/${c.path.split("/").map(encodeURIComponent).join("/")}`;
@@ -2038,12 +2063,12 @@ export function renderWikiAsk(opts: {
         <span aria-hidden="true">›</span>
         <span>ask</span>
       </nav>
-      <h1>Ask the wiki</h1>
-      <p class="muted">Ask anything about the exhibits you've captured. Answers come from your own wiki pages — with citations so you can read more.</p>
+      <h1>${ti("ask.title")}</h1>
+      <p class="muted">${ti("ask.lede")}</p>
       <form method="get" action="/wiki/${encodeURIComponent(user)}/_ask" class="ask-form">
         ${contextPath ? `<input type="hidden" name="about" value="${escapeHtml(contextPath)}" />` : ""}
-        <textarea name="q" rows="3" placeholder="e.g. What was bronze used for? Why are these styles different?" autofocus>${escapeHtml(question)}</textarea>
-        <button class="btn btn-primary" type="submit">Ask</button>
+        <textarea name="q" rows="3" placeholder="${tx("ask.placeholder", "en")}" autofocus>${escapeHtml(question)}</textarea>
+        <button class="btn btn-primary" type="submit">${ti("ask.submit")}</button>
       </form>
       ${error ? `<div class="ask-error">${escapeHtml(error)}</div>` : ""}
       ${answer ? `<article class="ask-answer">${answerHtml}</article>${citationsHtml}` : ""}
@@ -2084,7 +2109,7 @@ export function renderQuests(opts: {
     <article class="quest" style="${tone}">
       <div class="quest-emoji">${q.emoji}</div>
       <div class="quest-body">
-        <h3>${escapeHtml(q.title)} ${q.earnedAt ? `<span class="earned">earned ${escapeHtml((q.earnedAt || "").slice(0, 10))}</span>` : ""}</h3>
+        <h3>${escapeHtml(q.title)} ${q.earnedAt ? `<span class="earned">${ti("quests.earned")} ${escapeHtml((q.earnedAt || "").slice(0, 10))}</span>` : ""}</h3>
         <p class="quest-desc">${escapeHtml(q.description)}</p>
         <div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;"></div></div>
         <p class="quest-progress">${q.current} / ${q.target}${q.hint && !q.completed ? ` <span class="muted">· ${escapeHtml(q.hint)}</span>` : ""}</p>
@@ -2096,13 +2121,17 @@ export function renderQuests(opts: {
   <section class="wiki">
     <div class="container" style="max-width: 820px;">
       <header style="margin-bottom: 1.5rem;">
-        <p class="eyebrow">Junior Curator</p>
-        <h1>Quests &amp; badges</h1>
-        <p class="muted">${earned} of ${quests.length} earned · ${inProgress.length} in progress</p>
+        <p class="eyebrow">${ti("quests.eyebrow")}</p>
+        <h1>${ti("quests.title")}</h1>
+        <p class="muted">
+          <span data-lang="en">${earned} of ${quests.length} earned · ${inProgress.length} in progress</span>
+          <span data-lang="zh-CN">已获得 ${earned} / ${quests.length} · ${inProgress.length} 个进行中</span>
+          <span data-lang="zh-TW">已獲得 ${earned} / ${quests.length} · ${inProgress.length} 個進行中</span>
+        </p>
       </header>
-      ${earned ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">Earned (${earned})</h2><div class="quest-grid">${quests.filter((q) => q.earnedAt).map(card).join("")}</div>` : ""}
-      ${inProgress.length ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">In progress (${inProgress.length})</h2><div class="quest-grid">${inProgress.map(card).join("")}</div>` : ""}
-      ${locked.length ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">Up next (${locked.length})</h2><div class="quest-grid">${locked.map(card).join("")}</div>` : ""}
+      ${earned ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">${ti("quests.earnedSection")} (${earned})</h2><div class="quest-grid">${quests.filter((q) => q.earnedAt).map(card).join("")}</div>` : ""}
+      ${inProgress.length ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">${ti("quests.inProgressSection")} (${inProgress.length})</h2><div class="quest-grid">${inProgress.map(card).join("")}</div>` : ""}
+      ${locked.length ? `<h2 style="font-size:1.1rem;margin-top:1.5rem;">${ti("quests.upNext")} (${locked.length})</h2><div class="quest-grid">${locked.map(card).join("")}</div>` : ""}
     </div>
   </section>
   <style>
@@ -2133,31 +2162,31 @@ export function renderKnowledgeGraph(opts: {
   <section class="wiki">
     <div class="container kg-container">
       <header style="margin-bottom: 1rem;">
-        <p class="eyebrow">Cross-page view</p>
-        <h1>Knowledge graph</h1>
-        <p class="muted">${data.nodes.length} entity page${data.nodes.length === 1 ? "" : "s"}, ${data.edges.length} connection${data.edges.length === 1 ? "" : "s"}. Two pages connect when an exhibit cites both. Drag a node to rearrange, scroll to zoom, click to open. Filter by subject below.</p>
+        <p class="eyebrow">${ti("graph.eyebrow")}</p>
+        <h1>${ti("graph.title")}</h1>
+        <p class="muted">${data.nodes.length} ${ti("graph.entityPages")}, ${data.edges.length} ${ti("graph.connections")}. ${ti("graph.lede")}</p>
       </header>
 
       <div class="kg-toolbar">
         <div class="kg-filters" id="kg-filters">
-          <button type="button" class="kg-filter is-active" data-domain="all">All</button>
-          <button type="button" class="kg-filter domain-history" data-domain="history">🏺 History</button>
-          <button type="button" class="kg-filter domain-art" data-domain="art">🎨 Art</button>
-          <button type="button" class="kg-filter domain-science" data-domain="science">🦖 Science</button>
-          <button type="button" class="kg-filter domain-tech" data-domain="tech">⚙️ Tech</button>
-          <button type="button" class="kg-filter domain-culture" data-domain="culture">🌍 Culture</button>
-          <button type="button" class="kg-filter" data-domain="other">✨ Other</button>
+          <button type="button" class="kg-filter is-active" data-domain="all">${ti("graph.filterAll")}</button>
+          <button type="button" class="kg-filter domain-history" data-domain="history">🏺 ${ti("domain.history")}</button>
+          <button type="button" class="kg-filter domain-art" data-domain="art">🎨 ${ti("domain.art")}</button>
+          <button type="button" class="kg-filter domain-science" data-domain="science">🦖 ${ti("domain.science")}</button>
+          <button type="button" class="kg-filter domain-tech" data-domain="tech">⚙️ ${ti("domain.tech")}</button>
+          <button type="button" class="kg-filter domain-culture" data-domain="culture">🌍 ${ti("domain.culture")}</button>
+          <button type="button" class="kg-filter" data-domain="other">✨ ${ti("domain.other")}</button>
         </div>
         <div class="kg-controls">
-          <input type="search" id="kg-search" placeholder="Find a page…" />
-          <button type="button" id="kg-reset">Reset view</button>
+          <input type="search" id="kg-search" placeholder="${tx("graph.findPlaceholder", "en")}" />
+          <button type="button" id="kg-reset">${ti("graph.resetView")}</button>
         </div>
       </div>
 
       <div id="kg-wrap" class="kg-wrap">
         <svg id="kg-svg"></svg>
         <div id="kg-tip" class="kg-tip" hidden></div>
-        ${data.nodes.length === 0 ? `<div class="kg-empty"><p class="muted">The graph is empty. Capture more exhibits and the AI will start linking concepts together here.</p></div>` : ""}
+        ${data.nodes.length === 0 ? `<div class="kg-empty"><p class="muted">${ti("graph.empty")}</p></div>` : ""}
       </div>
 
       <p class="muted" style="font-size:.85rem;margin-top:.75rem;">Tip: hover a node to see its label, click to open the page. Drag the canvas to pan. Drag a node to rearrange.</p>
@@ -2465,8 +2494,10 @@ export function renderKnowledgeGraph(opts: {
 export function renderTimeline(opts: {
   user: string;
   points: Array<{ id: string; title: string; approx_year: number; primary_domain: string | null; child_summary: string | null }>;
+  lang?: Lang;
 }): string {
   const { user, points } = opts;
+  const lang: Lang = opts.lang ?? "en";
   const data = points.map((p) => ({
     id: p.id,
     title: p.title,
@@ -2480,26 +2511,26 @@ export function renderTimeline(opts: {
   <section class="wiki">
     <div class="container">
       <header style="margin-bottom: 1rem;">
-        <p class="eyebrow">Cross-time view</p>
-        <h1>Timeline</h1>
-        <p class="muted">${points.length} dated exhibit${points.length === 1 ? "" : "s"} on a symmetric-log axis from prehistory to today. Drag to pan, scroll or pinch to zoom, click a pin to open its wiki page.</p>
+        <p class="eyebrow">${ti("timeline.eyebrow")}</p>
+        <h1>${ti("timeline.title")}</h1>
+        <p class="muted">${points.length} ${ti("timeline.lede")}</p>
       </header>
 
       <div class="tl-legend" aria-label="Domain legend">
-        <span class="tl-leg tl-history">🏺 History</span>
-        <span class="tl-leg tl-art">🎨 Art</span>
-        <span class="tl-leg tl-science">🦖 Science</span>
-        <span class="tl-leg tl-tech">⚙️ Technology</span>
-        <span class="tl-leg tl-culture">🌍 Culture</span>
+        <span class="tl-leg tl-history">🏺 ${ti("domain.history")}</span>
+        <span class="tl-leg tl-art">🎨 ${ti("domain.art")}</span>
+        <span class="tl-leg tl-science">🦖 ${ti("domain.science")}</span>
+        <span class="tl-leg tl-tech">⚙️ ${ti("domain.tech")}</span>
+        <span class="tl-leg tl-culture">🌍 ${ti("domain.culture")}</span>
       </div>
 
       <div class="tl-wrap" id="tl-wrap">
         ${points.length === 0
-          ? `<p class="muted" style="padding:2rem 0;">No dated exhibits yet — once the AI assigns approx_year via ingest, pins will appear here.</p>`
+          ? `<p class="muted" style="padding:2rem 0;">${ti("timeline.empty")}</p>`
           : `<div class="tl-controls">
-              <button type="button" data-tl-zoom="-1" aria-label="Zoom out">−</button>
-              <button type="button" data-tl-zoom="+1" aria-label="Zoom in">＋</button>
-              <button type="button" data-tl-reset aria-label="Reset view">Reset</button>
+              <button type="button" data-tl-zoom="-1" aria-label="${tx("timeline.zoomOut", lang)}">−</button>
+              <button type="button" data-tl-zoom="+1" aria-label="${tx("timeline.zoomIn", lang)}">＋</button>
+              <button type="button" data-tl-reset aria-label="${tx("timeline.reset", lang)}">${ti("timeline.reset")}</button>
             </div>
             <svg id="tl-svg" role="img" aria-label="Timeline of captured exhibits"></svg>
             <div id="tl-tip" class="tl-tip" hidden></div>`
@@ -2762,10 +2793,10 @@ export function renderMap(opts: {
   const body = `
   <section class="wiki">
     <div class="container">
-      <h1>Map</h1>
-      <p class="muted">${points.length} located exhibit${points.length === 1 ? "" : "s"} from your wiki.</p>
+      <h1>${ti("map.title")}</h1>
+      <p class="muted">${points.length} ${ti("map.lede")}</p>
       ${points.length === 0
-        ? `<p class="muted">No located exhibits yet — once the AI assigns origin_lat/origin_lon via ingest, points will appear here.</p>`
+        ? `<p class="muted">${ti("map.empty")}</p>`
         : `<div id="map" style="height:540px;border-radius:1rem;overflow:hidden;border:1px solid var(--border,#e5e7eb);"></div>`
       }
     </div>

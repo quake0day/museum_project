@@ -27,13 +27,16 @@
   });
 
   // ───────────── Language toggle ─────────────
-  // Flips <html lang> instantly + persists via /api/lang cookie. CSS hides
-  // mismatched-language elements via [data-lang] selectors.
+  // Cycles EN → 简 (zh-CN) → 繁 (zh-TW) → EN. Flips <html lang> instantly
+  // + persists via the museiq_lang cookie. CSS hides mismatched-language
+  // elements via [data-lang] selectors.
+  const LANG_CYCLE = { 'en': 'zh-CN', 'zh-CN': 'zh-TW', 'zh-TW': 'en' };
   const langBtn = document.querySelector('[data-lang-toggle]');
   if (langBtn) {
     langBtn.addEventListener('click', () => {
       const html = document.documentElement;
-      const next = html.getAttribute('lang') === 'zh' ? 'en' : 'zh';
+      const cur = html.getAttribute('lang');
+      const next = LANG_CYCLE[cur] || 'zh-CN';
       html.setAttribute('lang', next);
       // fire-and-forget: server cookie persists the choice for next visit
       fetch('/api/lang', {
@@ -56,12 +59,17 @@
         if (!d) return;
         if (d.signedIn && d.user) {
           userPillSlot.outerHTML = `
-            <form method="POST" action="/logout" class="user-pill" title="Sign out" data-user-pill>
+            <form method="POST" action="/logout" class="user-pill" data-user-pill>
               <span class="user-pill-name">@${escapeText(d.user)}</span>
               <button type="submit" class="user-pill-out" aria-label="Sign out">↩</button>
             </form>`;
         } else {
-          userPillSlot.outerHTML = `<a class="user-pill user-pill-anon" href="/login" data-user-pill>Sign in</a>`;
+          userPillSlot.outerHTML =
+            `<a class="user-pill user-pill-anon" href="/login" data-user-pill>` +
+              `<span data-lang="en">Sign in</span>` +
+              `<span data-lang="zh-CN">登录</span>` +
+              `<span data-lang="zh-TW">登入</span>` +
+            `</a>`;
         }
       })
       .catch(() => {});

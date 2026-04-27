@@ -410,11 +410,19 @@ img { max-width: 100%; height: auto; display: block; }
 }
 .lang-toggle:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
 
-/* The bilingual rendering rule — hides whichever language doesn't match
-   the active <html lang>. Works for UI labels (rendered as paired
-   <span data-lang>) AND content cards (whole element marked data-lang). */
-html[lang="en"] [data-lang="zh"]:not(html),
-html[lang="zh"] [data-lang="en"]:not(html) {
+/* Tri-lingual visibility — hides UI labels and content blocks whose
+   data-lang doesn't match the active <html lang>.
+   - UI labels emit three spans (data-lang="en"/"zh-CN"/"zh-TW")
+   - Content cards/pages emit a generic data-lang="en" or "zh"; ZH content
+     stays visible under both Chinese variants because the language detector
+     can't reliably distinguish CN vs TW. */
+html[lang="en"] [data-lang="zh"],
+html[lang="en"] [data-lang="zh-CN"],
+html[lang="en"] [data-lang="zh-TW"],
+html[lang="zh-CN"] [data-lang="en"],
+html[lang="zh-CN"] [data-lang="zh-TW"],
+html[lang="zh-TW"] [data-lang="en"],
+html[lang="zh-TW"] [data-lang="zh-CN"] {
   display: none !important;
 }
 
