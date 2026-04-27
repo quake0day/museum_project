@@ -844,7 +844,9 @@ html[lang="zh-TW"] [data-lang="zh-CN"] {
 .lightbox {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  /* 9999 sits comfortably above Leaflet's control layers (which top out
+     around 1000) and our sticky page chrome. */
+  z-index: 9999;
   background: rgba(10, 8, 5, 0.88);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
