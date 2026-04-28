@@ -45,6 +45,8 @@ import { SUPPORTED as LANGS, DEFAULT_LANG } from "./i18n";
 import { getAiProvider } from "./ai";
 import { ingestExhibit } from "./wiki/ingest";
 import { getWikiPage, getInboundLinks, getInboundExhibits, getCoOccurringEntities, wikiStats, searchWiki } from "./wiki/db";
+import type { WikiPageRow } from "./wiki/db";
+import { translateEntityPage, findStaleEntityPages } from "./wiki/translate";
 import { buildIndexPage, buildLogPage } from "./wiki/index_render";
 import { buildEncyclopedia } from "./wiki/encyclopedia";
 import { buildKnowledgeGraph } from "./wiki/graph";
@@ -879,14 +881,38 @@ async function scheduled(_event: ScheduledEvent, env: Bindings, ctx: ExecutionCo
         .all<{ id: string }>();
     }
     const ids = (res.results ?? []).map((r) => r.id);
-    if (!ids.length) {
-      console.log("cron: nothing to ingest");
+    if (ids.length) {
+      console.log("cron: draining", ids.length, "exhibits");
+      ctx.waitUntil(ingestBatch(env, ids));
       return;
     }
-    console.log("cron: draining", ids.length, "items");
-    ctx.waitUntil(ingestBatch(env, ids));
+    // Once all exhibits are at v4, switch to draining stale entity pages
+    // (concept/place/period/etc) that survived previous re-ingests without
+    // being themselves bilingualized — these don't go through the full
+    // exhibit ingest, just one focused translation call each.
+    const userId = defaultUserId(env);
+    const stale = await findStaleEntityPages(env.DB, userId, CRON_BATCH_SIZE);
+    if (!stale.length) {
+      console.log("cron: nothing to ingest or translate");
+      return;
+    }
+    console.log("cron: translating", stale.length, "stale entity pages");
+    ctx.waitUntil(translateBatch(env, stale));
   } catch (e) {
     console.error("cron error", errMsg(e));
+  }
+}
+
+async function translateBatch(env: Bindings, pages: WikiPageRow[]): Promise<void> {
+  const ai = getAiProvider(env);
+  for (const page of pages) {
+    try {
+      const r = await translateEntityPage(ai, env.DB, page);
+      if (!r.ok) console.error("translate failed", page.path, r.error);
+    } catch (e) {
+      console.error("translate exception", page.path, errMsg(e));
+    }
+    await new Promise((r) => setTimeout(r, 250));
   }
 }
 
