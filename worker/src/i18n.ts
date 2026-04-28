@@ -283,6 +283,9 @@ const TABLE: Record<string, Entry> = {
   // ── chrome ──
   "a11y.skipToContent":      { en: "Skip to content","zh-CN": "跳到内容",   "zh-TW": "跳到內容" },
   "brand.subtitle":          { en: "Museum Interaction Platform", "zh-CN": "博物馆互动平台", "zh-TW": "博物館互動平台" },
+  "footer.edgeRendered":     { en: "Edge-rendered on Cloudflare Workers",
+                               "zh-CN": "由 Cloudflare Workers 在边缘渲染",
+                               "zh-TW": "由 Cloudflare Workers 在邊緣渲染" },
 
   // ── next adventure (data templates filled in by dashboard.ts) ──
   "next.firstCaptureTitle":  { en: "Capture your first exhibit", "zh-CN": "拍下你的第一件展品", "zh-TW": "拍下你的第一件展品" },

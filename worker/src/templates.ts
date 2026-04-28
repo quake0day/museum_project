@@ -130,7 +130,7 @@ function layout(opts: {
     <div class="container footer-inner">
       <span>© ${new Date().getFullYear()} MuseIQ</span>
       <span class="dot" aria-hidden="true">·</span>
-      <span>Edge-rendered on Cloudflare Workers</span>
+      <span>${ti("footer.edgeRendered")}</span>
     </div>
   </footer>
   <script src="/static/js/main.js" defer></script>
