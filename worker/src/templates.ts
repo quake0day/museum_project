@@ -1,5 +1,5 @@
 import type { InteractionRow, Stats } from "./db";
-import { escapeHtml, formatDate, detectLang } from "./util";
+import { escapeHtml, formatDate, formatDateBilingual, detectLang } from "./util";
 import type { WikiPageRow, WikiSearchHit, InboundExhibit, CoOccurrence } from "./wiki/db";
 import type { DashboardData } from "./wiki/dashboard";
 import type { EncyclopediaData } from "./wiki/encyclopedia";
@@ -650,7 +650,7 @@ export function renderList(data: {
           ${summaryHtml}
           <p class="card-response">${full || `<span class="muted">${ti("captures.noDescription")}</span>`}</p>
           ${tagsHtml}
-          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time>${wikiHref ? ` · <span class="card-go">${ti("captures.openWiki")}</span>` : ""}</p>
+          <p class="card-meta"><time datetime="${date}">${formatDateBilingual(it.date)}</time>${wikiHref ? ` · <span class="card-go">${ti("captures.openWiki")}</span>` : ""}</p>
         </div>
       ${cardClose}`;
         })

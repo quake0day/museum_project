@@ -54,6 +54,29 @@ export function formatDate(iso: string | null | undefined): string {
   });
 }
 
+// Bilingual date — emits paired <span data-lang> blocks so the active
+// <html lang> picks the right locale-formatted variant. Used in places
+// where the date is the only language signal on a card / row.
+export function formatDateBilingual(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const opts: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  };
+  const d = new Date(t);
+  const en    = d.toLocaleString("en-US",  opts);
+  const zh_CN = d.toLocaleString("zh-CN",  opts);
+  const zh_TW = d.toLocaleString("zh-TW",  opts);
+  return `<span data-lang="en">${en}</span>` +
+         `<span data-lang="zh-CN">${zh_CN}</span>` +
+         `<span data-lang="zh-TW">${zh_TW}</span>`;
+}
+
 export function truncate(s: string, n: number): string {
   if (!s) return "";
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
