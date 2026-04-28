@@ -10,15 +10,18 @@ import { appendWikiLog } from "./db";
 export type QuestDef = {
   id: string;
   title: string;
+  title_zh: string;        // Simplified Chinese
   description: string;
+  description_zh: string;
   emoji: string;
-  evaluate(db: D1Database, userId: string): Promise<{ current: number; target: number; hint?: string }>;
+  evaluate(db: D1Database, userId: string): Promise<{ current: number; target: number; hint?: string; hint_zh?: string }>;
 };
 
 export type QuestProgress = QuestDef & {
   current: number;
   target: number;
   hint?: string;
+  hint_zh?: string;
   completed: boolean;
   earnedAt?: string;
 };
@@ -112,8 +115,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "first-capture",
     title: "First Capture",
+    title_zh: "首次拍摄",
     emoji: "🎉",
     description: "Capture your first exhibit and let the AI write its wiki page.",
+    description_zh: "拍下你的第一件展品,让 AI 帮你写成百科页面。",
     async evaluate(db, userId) {
       const n = await countTotalDoneExhibits(db, userId);
       return { current: Math.min(n, 1), target: 1 };
@@ -122,8 +127,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "junior-curator",
     title: "Junior Curator",
+    title_zh: "小小策展人",
     emoji: "🏛️",
     description: "Capture 10 exhibits across any domain.",
+    description_zh: "在任何领域拍下 10 件展品。",
     async evaluate(db, userId) {
       return { current: await countTotalDoneExhibits(db, userId), target: 10 };
     },
@@ -131,8 +138,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "bronze-hunter",
     title: "Bronze Hunter",
+    title_zh: "青铜猎手",
     emoji: "🛡️",
     description: "Find 3 exhibits made of bronze.",
+    description_zh: "找到 3 件由青铜制成的展品。",
     async evaluate(db, userId) {
       return { current: await countExhibitsLinkingTo(db, userId, "materials/bronze"), target: 3 };
     },
@@ -140,8 +149,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "color-detective",
     title: "Color Detective",
+    title_zh: "色彩侦探",
     emoji: "🎨",
     description: "Capture 5 art exhibits and look closely at their colors.",
+    description_zh: "拍下 5 件艺术展品,仔细观察它们的颜色。",
     async evaluate(db, userId) {
       return { current: await countExhibitsWithDomain(db, userId, "art"), target: 5 };
     },
@@ -149,8 +160,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "time-traveler",
     title: "Time Traveler",
+    title_zh: "时空旅行者",
     emoji: "⏳",
     description: "Capture exhibits from 3 different time periods.",
+    description_zh: "拍下 3 个不同时代的展品。",
     async evaluate(db, userId) {
       return {
         current: await countDistinctTargetsByKind(db, userId, "period"),
@@ -161,21 +174,26 @@ export const QUESTS: QuestDef[] = [
   {
     id: "ancient-civilizations",
     title: "Ancient Civilizations Explorer",
+    title_zh: "古文明探索者",
     emoji: "🗿",
     description: "Visit 3 ancient civilizations through their artifacts (anything before 500 CE).",
+    description_zh: "通过文物探访 3 个古代文明(公元 500 年之前)。",
     async evaluate(db, userId) {
       return {
         current: await countExhibitsWithYearIn(db, userId, -200000, 500),
         target: 3,
         hint: "Tip: ancient Egypt, Greece, Rome, China, India, the Maya…",
+        hint_zh: "提示:古埃及、希腊、罗马、中国、印度、玛雅……",
       };
     },
   },
   {
     id: "around-the-world",
     title: "Around the World",
+    title_zh: "环游世界",
     emoji: "🌍",
     description: "Capture exhibits from 5 different places.",
+    description_zh: "拍下来自 5 个不同地点的展品。",
     async evaluate(db, userId) {
       return {
         current: await countDistinctTargetsByKind(db, userId, "place"),
@@ -186,8 +204,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "fossil-finder",
     title: "Fossil Finder",
+    title_zh: "化石发现者",
     emoji: "🦖",
     description: "Capture 3 natural-science exhibits (fossils, dinosaurs, minerals…).",
+    description_zh: "拍下 3 件自然科学展品(化石、恐龙、矿物……)。",
     async evaluate(db, userId) {
       return { current: await countExhibitsWithDomain(db, userId, "science"), target: 3 };
     },
@@ -195,8 +215,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "inventor",
     title: "Inventor's Apprentice",
+    title_zh: "发明家学徒",
     emoji: "⚙️",
     description: "Capture 3 technology or invention exhibits.",
+    description_zh: "拍下 3 件科技或发明展品。",
     async evaluate(db, userId) {
       const a = await countExhibitsWithDomain(db, userId, "tech");
       const b = await countExhibitsWithDomain(db, userId, "technology");
@@ -206,8 +228,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "world-traditions",
     title: "World Traditions",
+    title_zh: "世界传统",
     emoji: "🪔",
     description: "Capture 3 culture exhibits — clothing, food, festivals, music.",
+    description_zh: "拍下 3 件文化展品 — 服饰、食物、节日、音乐。",
     async evaluate(db, userId) {
       return { current: await countExhibitsWithDomain(db, userId, "culture"), target: 3 };
     },
@@ -215,8 +239,10 @@ export const QUESTS: QuestDef[] = [
   {
     id: "concept-collector",
     title: "Concept Collector",
+    title_zh: "概念收集者",
     emoji: "📚",
     description: "Have 10 different concept pages in your wiki.",
+    description_zh: "在你的百科里收集 10 个不同的概念页面。",
     async evaluate(db, userId) {
       return {
         current: await countDistinctTargetsByKind(db, userId, "concept"),

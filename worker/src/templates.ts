@@ -76,7 +76,7 @@ function layout(opts: {
   </script>
 </head>
 <body>
-  <a class="skip" href="#main">Skip to content</a>
+  <a class="skip" href="#main">${ti("a11y.skipToContent")}</a>
   <header class="site-header">
     <div class="container header-inner">
       <a href="/" class="brand" aria-label="MuseIQ home">
@@ -88,7 +88,7 @@ function layout(opts: {
         </span>
         <span class="brand-text">
           <strong>MuseIQ</strong>
-          <small>Museum Interaction Platform</small>
+          <small>${ti("brand.subtitle")}</small>
         </span>
       </a>
       <nav class="nav" aria-label="Primary">
@@ -152,23 +152,37 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
     const href = L(`/wiki/${encodeURIComponent(user)}/exhibits/${encodeURIComponent(r.id)}`);
     const dom = r.primary_domain ?? "";
     const emoji = DOMAIN_EMOJI[dom] ?? "✨";
+    const titleHtml = r.title_zh
+      ? `<span data-lang="en">${escapeHtml(r.title)}</span><span data-lang="zh">${escapeHtml(r.title_zh)}</span>`
+      : escapeHtml(r.title);
+    let summaryHtml = "";
+    if (r.child_summary && r.child_summary_zh) {
+      summaryHtml = `<p><span data-lang="en">${escapeHtml(r.child_summary)}</span><span data-lang="zh">${escapeHtml(r.child_summary_zh)}</span></p>`;
+    } else if (r.child_summary_zh) {
+      summaryHtml = `<p>${escapeHtml(r.child_summary_zh)}</p>`;
+    } else if (r.child_summary) {
+      summaryHtml = `<p>${escapeHtml(r.child_summary)}</p>`;
+    }
     return `<a class="dash-recent-card domain-${escapeHtml(dom)}" href="${href}">
       <div class="dash-recent-img"><img src="${src}" alt="${escapeHtml(r.title ?? "")}" loading="lazy" /></div>
       <div class="dash-recent-body">
-        <span class="domain-chip">${emoji} ${escapeHtml(dom || "exhibit")}</span>
-        <h3>${escapeHtml(r.title)}</h3>
-        ${r.child_summary ? `<p>${escapeHtml(r.child_summary)}</p>` : ""}
+        <span class="domain-chip">${emoji} ${dom ? ti(dom === "science" ? "domain.naturalScience" : `domain.${dom}`) : ti("domain.other")}</span>
+        <h3>${titleHtml}</h3>
+        ${summaryHtml}
       </div>
     </a>`;
   };
 
   const questBar = (q: typeof inProgress[number]) => {
     const pct = Math.min(100, Math.round((q.current / Math.max(1, q.target)) * 100));
+    const titleHtml = q.title_zh
+      ? `<span data-lang="en">${escapeHtml(q.title)}</span><span data-lang="zh">${escapeHtml(q.title_zh)}</span>`
+      : escapeHtml(q.title);
     return `<a href="${L("/me/quests")}" class="dash-quest">
       <div class="dash-quest-emoji">${q.emoji}</div>
       <div class="dash-quest-body">
         <div class="dash-quest-row">
-          <strong>${escapeHtml(q.title)}</strong>
+          <strong>${titleHtml}</strong>
           <span class="muted">${q.current} / ${q.target}</span>
         </div>
         <div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;"></div></div>
@@ -200,8 +214,8 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
         <div class="dash-next-emoji" aria-hidden="true">${nextAdventure.emoji}</div>
         <div class="dash-next-body">
           <p class="eyebrow">${ti("home.next")}</p>
-          <h2>${escapeHtml(nextAdventure.title)}</h2>
-          <p>${escapeHtml(nextAdventure.hint)}</p>
+          <h2><span data-lang="en">${escapeHtml(nextAdventure.title_en)}</span><span data-lang="zh">${escapeHtml(nextAdventure.title_zh)}</span></h2>
+          <p><span data-lang="en">${escapeHtml(nextAdventure.hint_en)}</span><span data-lang="zh">${escapeHtml(nextAdventure.hint_zh)}</span></p>
         </div>
         <span class="dash-next-arrow" aria-hidden="true">→</span>
       </a>
@@ -242,13 +256,18 @@ export function renderStudentHome(opts: { user: string; data: DashboardData; isS
         <a href="${L("/me/quests")}" class="muted">${ti("home.allbadges")}</a>
       </header>
       <div class="dash-badges">
-        ${earnedRecent.map((q) => `<a class="dash-badge" href="${L("/me/quests")}" title="${escapeHtml(q.description)}">
-          <div class="dash-badge-emoji">${q.emoji}</div>
-          <div>
-            <strong>${escapeHtml(q.title)}</strong>
-            <small class="muted">${q.earnedAt ? "earned " + escapeHtml(q.earnedAt.slice(0, 10)) : ""}</small>
-          </div>
-        </a>`).join("")}
+        ${earnedRecent.map((q) => {
+          const titleHtml = q.title_zh
+            ? `<span data-lang="en">${escapeHtml(q.title)}</span><span data-lang="zh">${escapeHtml(q.title_zh)}</span>`
+            : escapeHtml(q.title);
+          return `<a class="dash-badge" href="${L("/me/quests")}" title="${escapeHtml(q.description)}">
+            <div class="dash-badge-emoji">${q.emoji}</div>
+            <div>
+              <strong>${titleHtml}</strong>
+              <small class="muted">${q.earnedAt ? `${ti("badge.earnedPrefix")} ${escapeHtml(q.earnedAt.slice(0, 10))}` : ""}</small>
+            </div>
+          </a>`;
+        }).join("")}
       </div>
     </div>
   </section>` : ""}
@@ -2229,10 +2248,10 @@ export function renderQuests(opts: {
     <article class="quest" style="${tone}">
       <div class="quest-emoji">${q.emoji}</div>
       <div class="quest-body">
-        <h3>${escapeHtml(q.title)} ${q.earnedAt ? `<span class="earned">${ti("quests.earned")} ${escapeHtml((q.earnedAt || "").slice(0, 10))}</span>` : ""}</h3>
-        <p class="quest-desc">${escapeHtml(q.description)}</p>
+        <h3>${(q as any).title_zh ? `<span data-lang="en">${escapeHtml(q.title)}</span><span data-lang="zh">${escapeHtml((q as any).title_zh)}</span>` : escapeHtml(q.title)} ${q.earnedAt ? `<span class="earned">${ti("quests.earned")} ${escapeHtml((q.earnedAt || "").slice(0, 10))}</span>` : ""}</h3>
+        <p class="quest-desc">${(q as any).description_zh ? `<span data-lang="en">${escapeHtml(q.description)}</span><span data-lang="zh">${escapeHtml((q as any).description_zh)}</span>` : escapeHtml(q.description)}</p>
         <div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;"></div></div>
-        <p class="quest-progress">${q.current} / ${q.target}${q.hint && !q.completed ? ` <span class="muted">· ${escapeHtml(q.hint)}</span>` : ""}</p>
+        <p class="quest-progress">${q.current} / ${q.target}${q.hint && !q.completed ? ` <span class="muted">· ${(q as any).hint_zh ? `<span data-lang="en">${escapeHtml(q.hint)}</span><span data-lang="zh">${escapeHtml((q as any).hint_zh)}</span>` : escapeHtml(q.hint)}</span>` : ""}</p>
       </div>
     </article>`;
   };
