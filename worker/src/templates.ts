@@ -600,7 +600,8 @@ export function renderList(data: {
           const src = "/media/" + it.image.split("/").map(encodeURIComponent).join("/");
           const full = escapeHtml(it.response ?? "");
           const date = escapeHtml(it.date ?? "");
-          const summary = it.child_summary ? escapeHtml(it.child_summary) : "";
+          const sumEn = it.child_summary ?? "";
+          const sumZh = it.child_summary_zh ?? "";
           const domain = it.primary_domain ?? null;
           const domainEmoji = domain
             ? ({ history: "🏺", art: "🎨", science: "🦖", tech: "⚙️", technology: "⚙️", culture: "🌍" }[domain] ?? "")
@@ -608,30 +609,48 @@ export function renderList(data: {
           const wikiHref = it.analysis_status === "done"
             ? L(`/wiki/${encodeURIComponent(userForLink)}/exhibits/${encodeURIComponent(it.id)}`)
             : null;
-          // When the wiki page exists, the whole card becomes a link to it.
-          // Otherwise the lightbox-trigger keeps its zoom-on-click behavior.
           const domainCls = domain ? `domain-${escapeHtml(domain)}` : "";
-          // Tag the card by what the CHILD typed only — the AI-generated
-          // summary is English in legacy rows and would dominate the
-          // detector, hiding cards whose actual user-typed response was
-          // Chinese. Cards with empty / mixed / non-Latin-non-CJK responses
-          // stay untagged and show in any UI lang.
+          // Tag the card by the response language only — see comment above.
           const cardLang = detectLang(it.response ?? "");
           const cardLangAttr = (cardLang === "en" || cardLang === "zh") ? ` data-lang="${cardLang}"` : "";
           const cardOpen = wikiHref
             ? `<a class="card card-link ${domainCls}" href="${wikiHref}"${cardLangAttr}>`
             : `<article class="card ${domainCls}" data-lightbox-trigger data-src="${src}" data-caption="${escapeHtml(it.response ?? "")}"${cardLangAttr}>`;
           const cardClose = wikiHref ? `</a>` : `</article>`;
+          // Bilingual summary: paired spans when both available, plain text
+          // when only one (legacy rows where summary_zh isn't yet in the
+          // wiki page frontmatter). Empty when neither.
+          let summaryHtml = "";
+          if (sumEn && sumZh) {
+            summaryHtml = `<p class="card-summary"><span data-lang="en">${escapeHtml(sumEn)}</span><span data-lang="zh">${escapeHtml(sumZh)}</span></p>`;
+          } else if (sumZh) {
+            summaryHtml = `<p class="card-summary">${escapeHtml(sumZh)}</p>`;
+          } else if (sumEn) {
+            summaryHtml = `<p class="card-summary">${escapeHtml(sumEn)}</p>`;
+          }
+          // Tag chips — entities the wiki links this exhibit to. Each chip
+          // links to the entity page and renders bilingually when the entity
+          // page has title_zh in its frontmatter.
+          const tags = it.tags ?? [];
+          const tagsHtml = tags.length
+            ? `<div class="card-tags">${tags.map((t) => {
+                const labelHtml = t.title_zh
+                  ? `<span data-lang="en">${escapeHtml(t.title)}</span><span data-lang="zh">${escapeHtml(t.title_zh)}</span>`
+                  : escapeHtml(t.title);
+                return `<span class="card-tag">${labelHtml}</span>`;
+              }).join("")}</div>`
+            : "";
           return `
       ${cardOpen}
         <div class="card-media">
           <img src="${src}" alt="Exhibit response" loading="lazy" decoding="async" />
         </div>
         <div class="card-body">
-          ${domain ? `<span class="domain-chip">${domainEmoji} ${escapeHtml(domain)}</span>` : ""}
-          ${summary ? `<p class="card-summary">${summary}</p>` : ""}
-          <p class="card-response">${full || '<span class="muted">(no description)</span>'}</p>
-          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time>${wikiHref ? ` · <span class="card-go">open wiki →</span>` : ""}</p>
+          ${domain ? `<span class="domain-chip">${domainEmoji} ${ti(domain === "science" ? "domain.naturalScience" : `domain.${domain}`)}</span>` : ""}
+          ${summaryHtml}
+          <p class="card-response">${full || `<span class="muted">${ti("captures.noDescription")}</span>`}</p>
+          ${tagsHtml}
+          <p class="card-meta"><time datetime="${date}">${escapeHtml(formatDate(it.date))}</time>${wikiHref ? ` · <span class="card-go">${ti("captures.openWiki")}</span>` : ""}</p>
         </div>
       ${cardClose}`;
         })
@@ -736,6 +755,17 @@ export function renderList(data: {
     .card-go { color: var(--accent-ink); font-weight: 500; }
     .card-meta { font-size: .78rem; color: var(--ink-muted); }
     .card .domain-chip { margin-bottom: .35rem; }
+    .card-tags { display: flex; flex-wrap: wrap; gap: .25rem; margin: .35rem 0; }
+    .card-tag {
+      display: inline-block;
+      padding: .1rem .55rem;
+      border-radius: 999px;
+      background: var(--bg-soft);
+      border: 1px solid var(--border);
+      color: var(--ink-soft);
+      font-size: .7rem;
+      line-height: 1.4;
+    }
   </style>
   `;
   return layout({

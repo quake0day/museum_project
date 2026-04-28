@@ -200,7 +200,7 @@ app.get("/", async (c) => {
 
 app.get("/about", async (c) => {
   try {
-    const stats = await getStats(c.env.DB);
+    const stats = await getStats(c.env.DB, c.var.currentUser);
     return c.html(renderHome({ stats, ...chrome(c) }));
   } catch (err) {
     console.error("about error", err);
@@ -258,6 +258,7 @@ app.get("/interactions/view", async (c) => {
     const page = Math.max(1, parsePositiveInt(c.req.query("page"), 1));
     const q = (c.req.query("q") ?? "").trim();
     const { rows, count } = await getInteractions(c.env.DB, {
+      userId: c.var.currentUser,
       page,
       pageSize,
       query: q,
@@ -317,7 +318,7 @@ app.get("/api/health", async (c) => {
 
 app.get("/api/stats", async (c) => {
   try {
-    return c.json(await getStats(c.env.DB));
+    return c.json(await getStats(c.env.DB, c.var.currentUser));
   } catch (err) {
     return c.json({ error: errMsg(err) }, 500);
   }
@@ -328,6 +329,7 @@ app.get("/api/interactions/list", async (c) => {
   const page = Math.max(1, parsePositiveInt(c.req.query("page"), 1));
   const q = (c.req.query("q") ?? "").trim();
   const { rows, count } = await getInteractions(c.env.DB, {
+    userId: c.var.currentUser,
     page,
     pageSize,
     query: q,
@@ -463,7 +465,10 @@ app.get("/admin/photos", async (c) => {
     const pageSize = parsePositiveInt(c.env.PAGE_SIZE, 12);
     const page = Math.max(1, parsePositiveInt(c.req.query("page"), 1));
     const q = (c.req.query("q") ?? "").trim();
+    // Admin is scoped to the default tenant (demo). Cross-user admin
+    // would need a user-picker; out of scope for now.
     const { rows, count } = await getInteractions(c.env.DB, {
+      userId: defaultUserId(c.env),
       page,
       pageSize,
       query: q,
@@ -517,6 +522,7 @@ app.post("/admin/delete", async (c) => {
     // page that still has content (or page 1 if the archive is empty).
     const pageSize = parsePositiveInt(c.env.PAGE_SIZE, 12);
     const { count } = await getInteractions(c.env.DB, {
+      userId: defaultUserId(c.env),
       page: 1,
       pageSize: 1,
       query,
