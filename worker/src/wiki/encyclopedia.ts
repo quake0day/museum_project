@@ -13,7 +13,8 @@ export type EncyclopediaEntry = {
   title_zh: string | null;   // pulled from frontmatter when present (v4 bilingual ingest)
   kind: string;
   inbound_links: number;
-  summary: string | null;
+  summary: string | null;    // legacy / single-lang fallback
+  summary_zh: string | null; // post-v4 bilingual ingest
 };
 
 export type EncyclopediaSection = {
@@ -154,13 +155,15 @@ export async function buildEncyclopedia(
         if (typeof fm.title_zh === "string" && fm.title_zh.trim()) titleZh = fm.title_zh.trim();
       }
     } catch { /* ignore */ }
+    const summaries = extractBilingualSummary(p);
     sec.byKind[p.kind].push({
       path: p.path,
       title: p.title,
       title_zh: titleZh,
       kind: p.kind,
       inbound_links: p.inbound_links,
-      summary: extractFirstSummary(p),
+      summary: summaries.en,
+      summary_zh: summaries.zh,
     });
     sec.total++;
   }
@@ -208,6 +211,32 @@ function extractFirstSummary(p: WikiPageRow): string | null {
   const m = p.body.match(/\n>\s+([^\n]+)/);
   if (m) return clip(m[1], 140);
   return null;
+}
+
+// For v4 bilingual bodies the EN and ZH definitions live inside their own
+// data-lang divs; we extract each one independently. Falls back to the
+// single-language summary for legacy bodies.
+function extractBilingualSummary(p: WikiPageRow): { en: string | null; zh: string | null } {
+  const enDiv = pickDiv(p.body, "en");
+  const zhDiv = pickDiv(p.body, "zh");
+  if (enDiv || zhDiv) {
+    return {
+      en: enDiv ? firstBlockquote(enDiv) : null,
+      zh: zhDiv ? firstBlockquote(zhDiv) : null,
+    };
+  }
+  return { en: extractFirstSummary(p), zh: null };
+}
+
+function pickDiv(body: string, lang: string): string | null {
+  const re = new RegExp(`<div\\s+data-lang="${lang}"[^>]*>([\\s\\S]*?)</div>`, "i");
+  const m = body.match(re);
+  return m ? m[1] : null;
+}
+
+function firstBlockquote(md: string): string | null {
+  const m = md.match(/(?:^|\n)>\s+([^\n]+)/);
+  return m ? clip(m[1], 140) : null;
 }
 
 function clip(s: string, n: number): string {

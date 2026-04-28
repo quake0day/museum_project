@@ -1695,7 +1695,20 @@ export function renderEncyclopediaIndex(opts: {
         const inb = e.inbound_links > 0
           ? `<span class="enc-meta">${e.inbound_links} link${e.inbound_links === 1 ? "" : "s"} in</span>`
           : "";
-        const summary = e.summary ? `<span class="enc-summary">${escapeHtml(e.summary)}</span>` : "";
+        // Paired EN/ZH spans when both available; plain text otherwise so
+        // legacy single-lang entries don't disappear in the non-matching
+        // UI lang. Same pattern as bilingualSummary in renderWikiPage.
+        let summary = "";
+        if (e.summary && e.summary_zh) {
+          summary = `<span class="enc-summary">` +
+            `<span data-lang="en">${escapeHtml(e.summary)}</span>` +
+            `<span data-lang="zh">${escapeHtml(e.summary_zh)}</span>` +
+            `</span>`;
+        } else if (e.summary) {
+          summary = `<span class="enc-summary">${escapeHtml(e.summary)}</span>`;
+        } else if (e.summary_zh) {
+          summary = `<span class="enc-summary">${escapeHtml(e.summary_zh)}</span>`;
+        }
         // If the page has title_zh from a v4 ingest, render paired spans
         // so the active <html lang> picks the right one. Otherwise plain.
         const titleHtml = e.title_zh
