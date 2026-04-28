@@ -12,7 +12,7 @@ AI_PROVIDER = "deepseek"
 AI_MODEL_CHAT = "deepseek-chat"
 AI_DAILY_CALL_CAP = "5000"
 ANALYSIS_VERSION = "1"
-DEFAULT_USER_ID = "chen"
+DEFAULT_USER_ID = "demo"
 
 # bundle the wiki schema doc as a string import in src/ai/prompts.ts
 [[rules]]

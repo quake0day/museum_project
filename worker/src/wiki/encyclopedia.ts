@@ -10,6 +10,7 @@ export type Domain = "art" | "history" | "science" | "tech" | "culture" | "other
 export type EncyclopediaEntry = {
   path: string;
   title: string;
+  title_zh: string | null;   // pulled from frontmatter when present (v4 bilingual ingest)
   kind: string;
   inbound_links: number;
   summary: string | null;
@@ -146,9 +147,17 @@ export async function buildEncyclopedia(
     if (!sections.has(dom)) dom = "other";
     const sec = sections.get(dom)!;
     sec.byKind[p.kind] = sec.byKind[p.kind] ?? [];
+    let titleZh: string | null = null;
+    try {
+      if (p.frontmatter_json) {
+        const fm = JSON.parse(p.frontmatter_json);
+        if (typeof fm.title_zh === "string" && fm.title_zh.trim()) titleZh = fm.title_zh.trim();
+      }
+    } catch { /* ignore */ }
     sec.byKind[p.kind].push({
       path: p.path,
       title: p.title,
+      title_zh: titleZh,
       kind: p.kind,
       inbound_links: p.inbound_links,
       summary: extractFirstSummary(p),

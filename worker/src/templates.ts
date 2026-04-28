@@ -33,7 +33,7 @@ function layout(opts: {
   // The user pill is rendered server-side when known, otherwise filled in by
   // main.js on page load via /api/me — this lets every render function stay
   // simple while still showing the right state on every page.
-  const userForLink = opts.currentUser || "chen"; // safe fallback to default tenant
+  const userForLink = opts.currentUser || "demo"; // safe fallback to default tenant
   const L = (path: string) => linkPath(lang, path);
   const wikiHref = L(`/wiki/${encodeURIComponent(userForLink)}/index`);
   const userPill = opts.isSignedIn && opts.currentUser
@@ -572,7 +572,7 @@ export function renderList(data: {
 }): string {
   const { interactions, page, totalPages, count, query, hasPrev, hasNext } = data;
   const lang: Lang = data.lang ?? "en";
-  const userForLink = data.currentUser || "chen";
+  const userForLink = data.currentUser || "demo";
   const L = (path: string) => linkPath(lang, path);
 
   const cards = interactions.length
@@ -1674,26 +1674,37 @@ export function renderEncyclopediaIndex(opts: {
   const L = (path: string) => linkPath(lang, path);
   const wikiPath = (p: string) => L(`/wiki/${encodeURIComponent(user)}/${p.split("/").map(encodeURIComponent).join("/")}`);
 
-  const navLinks = data.sections.map((s) =>
-    `<a href="#sec-${s.domain}" class="enc-jump domain-${s.domain}">
+  const navLinks = data.sections.map((s) => {
+    const labelHtml = ti(s.domain === "science" ? "domain.naturalScience" : `domain.${s.domain}`);
+    return `<a href="#sec-${s.domain}" class="enc-jump domain-${s.domain}">
       <span class="enc-jump-emoji">${s.emoji}</span>
-      <span class="enc-jump-label">${escapeHtml(s.label)}</span>
+      <span class="enc-jump-label">${labelHtml}</span>
       <span class="enc-jump-count">${s.total}</span>
-    </a>`
-  ).join("");
+    </a>`;
+  }).join("");
+
+  // Map encyclopedia.Domain ids to the i18n keys we have in the dictionary.
+  const domainKey = (d: string) => d === "science" ? "domain.naturalScience" : `domain.${d}`;
 
   const sectionHtml = data.sections.map((s) => {
     const kindKeys = Object.keys(s.byKind).sort((a, b) => kindRank(a) - kindRank(b));
     const kindBlocks = kindKeys.map((k) => {
       const entries = s.byKind[k];
+      const kindLabelHtml = ti(`kindLabel.${k}`); // falls through to key if missing
       const items = entries.map((e) => {
         const inb = e.inbound_links > 0
           ? `<span class="enc-meta">${e.inbound_links} link${e.inbound_links === 1 ? "" : "s"} in</span>`
           : "";
         const summary = e.summary ? `<span class="enc-summary">${escapeHtml(e.summary)}</span>` : "";
+        // If the page has title_zh from a v4 ingest, render paired spans
+        // so the active <html lang> picks the right one. Otherwise plain.
+        const titleHtml = e.title_zh
+          ? `<span data-lang="en">${escapeHtml(e.title)}</span>` +
+            `<span data-lang="zh">${escapeHtml(e.title_zh)}</span>`
+          : escapeHtml(e.title);
         return `<li class="enc-entry">
           <a href="${wikiPath(e.path)}" class="enc-entry-link">
-            <strong>${escapeHtml(e.title)}</strong>
+            <strong>${titleHtml}</strong>
             ${summary}
           </a>
           ${inb}
@@ -1701,17 +1712,19 @@ export function renderEncyclopediaIndex(opts: {
       }).join("");
       return `<div class="enc-kind">
         <h3 class="enc-kind-head">
-          <span class="enc-kind-label">${escapeHtml(kindLabel(k))}</span>
+          <span class="enc-kind-label">${kindLabelHtml}</span>
           <span class="enc-kind-count">${entries.length}</span>
         </h3>
         <ul class="enc-list">${items}</ul>
       </div>`;
     }).join("");
 
+    const sectionLabelHtml = ti(domainKey(s.domain));
+
     return `<section class="enc-section domain-${s.domain}" id="sec-${s.domain}">
       <header class="enc-section-head">
         <span class="enc-section-emoji">${s.emoji}</span>
-        <h2>${escapeHtml(s.label)}</h2>
+        <h2>${sectionLabelHtml}</h2>
         <span class="enc-section-count">${s.total} page${s.total === 1 ? "" : "s"}</span>
       </header>
       <div class="enc-kinds">${kindBlocks}</div>
