@@ -286,6 +286,8 @@ const TABLE: Record<string, Entry> = {
   "footer.edgeRendered":     { en: "Edge-rendered on Cloudflare Workers",
                                "zh-CN": "由 Cloudflare Workers 在边缘渲染",
                                "zh-TW": "由 Cloudflare Workers 在邊緣渲染" },
+  "wiki.userWikiSuffix":     { en: "'s wiki",         "zh-CN": " 的百科",   "zh-TW": " 的百科" },
+  "wiki.path":               { en: "path",            "zh-CN": "路径",      "zh-TW": "路徑" },
 
   // ── next adventure (data templates filled in by dashboard.ts) ──
   "next.firstCaptureTitle":  { en: "Capture your first exhibit", "zh-CN": "拍下你的第一件展品", "zh-TW": "拍下你的第一件展品" },

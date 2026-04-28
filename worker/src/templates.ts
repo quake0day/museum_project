@@ -1244,9 +1244,9 @@ export function renderWikiPage(opts: {
     <div class="wiki-hero">
       <div class="container wiki-container">
         <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
-          <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
+          <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}${ti("wiki.userWikiSuffix")}</a>
           <span aria-hidden="true">›</span>
-          <span>${escapeHtml(page.kind.replace("_", " "))}</span>
+          <span>${ti(`kindLabel.${page.kind}`)}</span>
         </nav>
         <div class="wiki-hero-grid">
           ${imageHtml}
@@ -1277,7 +1277,7 @@ export function renderWikiPage(opts: {
       ${inboundHtml}
       <details class="wiki-meta">
         <summary>${ti("wiki.pageInfo")} <span class="muted">${ti("wiki.forGrownups")}</span></summary>
-        <p class="muted">${ti("wiki.lastUpdated")} · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} ${ti("wiki.outboundLinks")} · ${page.inbound_links} ${ti("wiki.inboundLinks")} · path <code>${escapeHtml(page.path)}</code></p>
+        <p class="muted">${ti("wiki.lastUpdated")} · ${escapeHtml(formatDate(page.updated_at))} · ${page.outbound_links} ${ti("wiki.outboundLinks")} · ${page.inbound_links} ${ti("wiki.inboundLinks")} · ${ti("wiki.path")} <code>${escapeHtml(page.path)}</code></p>
       </details>
     </div>
   </section>
@@ -1930,7 +1930,7 @@ export function renderWikiSyntheticPage(opts: {
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb" aria-label="Breadcrumb">
-        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}${ti("wiki.userWikiSuffix")}</a>
         <span aria-hidden="true">›</span>
         <span>${escapeHtml(kind)}</span>
       </nav>
@@ -1981,7 +1981,7 @@ export function renderWikiSearch(opts: {
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb">
-        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}${ti("wiki.userWikiSuffix")}</a>
         <span aria-hidden="true">›</span>
         <span>search</span>
       </nav>
@@ -2028,7 +2028,7 @@ export function renderCompare(opts: {
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb">
-        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}${ti("wiki.userWikiSuffix")}</a>
         <span aria-hidden="true">›</span>
         <span>compare</span>
       </nav>
@@ -2093,7 +2093,7 @@ export function renderQuiz(opts: {
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb">
-        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}${ti("wiki.userWikiSuffix")}</a>
         <span aria-hidden="true">›</span>
         <a href="${pageHref}">${escapeHtml(quiz.pageTitle)}</a>
         <span aria-hidden="true">›</span>
@@ -2198,7 +2198,7 @@ export function renderWikiAsk(opts: {
   <section class="wiki">
     <div class="container wiki-container">
       <nav class="wiki-breadcrumb">
-        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}'s wiki</a>
+        <a href="${L(`/wiki/${encodeURIComponent(user)}/index`)}">${escapeHtml(user)}${ti("wiki.userWikiSuffix")}</a>
         <span aria-hidden="true">›</span>
         <span>ask</span>
       </nav>
