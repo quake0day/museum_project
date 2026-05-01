@@ -1,11 +1,25 @@
 import { Hono } from "hono";
 import {
   deleteInteraction,
+  deleteInteractionCascade,
   getInteractionById,
   getInteractions,
   getStats,
   saveInteractionRow,
+  ensureUserRow,
+  getUserRow,
+  getUserByEmail,
+  setPendingPin,
+  activatePendingPin,
+  clearPendingPin,
+  clearActivePin,
+  recordFailedAttempt,
+  resetFailedAttempts,
+  setRecoveryToken,
+  clearRecoveryToken,
+  replaceActivePin,
 } from "./db";
+import type { UserRow } from "./db";
 import {
   renderAdminList,
   renderAdminLogin,
@@ -27,7 +41,11 @@ import {
   renderEncyclopediaIndex,
   renderKnowledgeGraph,
   renderLogin,
+  renderSecurity,
+  renderForgotPin,
+  renderResetPin,
 } from "./templates";
+import type { SecurityState } from "./templates";
 import {
   decodeDataUrl,
   normalizeId,
@@ -41,7 +59,17 @@ import {
   verifyUserToken,
 } from "./util";
 import type { Lang } from "./i18n";
-import { SUPPORTED as LANGS, DEFAULT_LANG } from "./i18n";
+import { SUPPORTED as LANGS, DEFAULT_LANG, tx } from "./i18n";
+import {
+  hashPin,
+  verifyPin,
+  isValidPin,
+  generateToken,
+  hashToken,
+  verifyToken,
+} from "./auth";
+import { sendEmail, pinVerifyTemplate, pinRecoveryTemplate } from "./email";
+import { analyseImage, availableModels } from "./ai/vision";
 import { getAiProvider } from "./ai";
 import { ingestExhibit } from "./wiki/ingest";
 import { getWikiPage, getInboundLinks, getInboundExhibits, getCoOccurringEntities, wikiStats, searchWiki } from "./wiki/db";
@@ -61,13 +89,18 @@ import { generateQuiz } from "./wiki/quiz";
 export type Bindings = {
   DB: D1Database;
   MEDIA: R2Bucket;
+  AI?: any;                      // Cloudflare Workers AI binding
   PAGE_SIZE?: string;
   ADMIN_PASSWORD?: string;
   ADMIN_SESSION_SECRET?: string;
   AI_PROVIDER?: string;
   AI_MODEL_CHAT?: string;
   DEEPSEEK_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  GEMINI_API_KEY?: string;
   DEFAULT_USER_ID?: string;
+  RESEND_API_KEY?: string;
+  MUSEIQ_FROM_EMAIL?: string;
 };
 
 const ADMIN_COOKIE = "museiq_admin";
@@ -218,30 +251,147 @@ app.get("/login", (c) => {
   return c.html(renderLogin({ next, error: null, currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang }));
 });
 
+// Two-step login. POST /login with just `name` checks for an active PIN
+// and either lets you in or re-renders with a PIN field. POST again with
+// `name` + `pin` to verify and sign in. Lockout: 5 wrong PINs → 15 min.
 app.post("/login", async (c) => {
   const secret = c.env.ADMIN_SESSION_SECRET || c.env.ADMIN_PASSWORD || "";
   if (!secret) return c.html(renderError("Auth secret not configured", chrome(c)), 500);
   const form = await c.req.formData().catch(() => null);
   const nameRaw = form?.get("name");
   const nextRaw = form?.get("next");
+  const pinRaw  = form?.get("pin");
   const name = typeof nameRaw === "string" ? nameRaw : "";
+  const next = typeof nextRaw === "string" && nextRaw.startsWith("/") ? nextRaw : "/";
   const slug = slugifyUserName(name);
   if (!slug) {
     return c.html(renderLogin({
-      next: typeof nextRaw === "string" ? nextRaw : "/",
-      error: "Use letters, numbers, or hyphens (1–32 characters).",
-      currentUser: c.var.currentUser,
-      isSignedIn: c.var.isSignedIn,
-      lang: c.var.lang,
+      next, error: "Use letters, numbers, or hyphens (1–32 characters).",
+      currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+      nameValue: name,
     }), 400);
   }
+
+  const userRow = await getUserRow(c.env.DB, slug);
+  const hasActivePin = !!(userRow?.pin_hash && userRow?.pin_salt && userRow?.pin_iterations);
+
+  // Branch 1: no PIN — sign in immediately.
+  if (!hasActivePin) {
+    const token = await signUserToken(secret, slug, USER_TTL_SECONDS);
+    c.header("Set-Cookie",
+      `${USER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${USER_TTL_SECONDS}`);
+    return c.redirect(next, 303);
+  }
+
+  // Branch 2: PIN required.
+  const lockedUntil = userRow?.locked_until ? Date.parse(userRow.locked_until) : 0;
+  const lockedRemaining = lockedUntil > Date.now()
+    ? Math.ceil((lockedUntil - Date.now()) / 1000)
+    : 0;
+
+  // No PIN provided yet — render the PIN form.
+  if (typeof pinRaw !== "string" || pinRaw.length === 0) {
+    return c.html(renderLogin({
+      next, error: null,
+      currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+      requirePin: true, nameValue: slug, lockedUntilSec: lockedRemaining,
+    }));
+  }
+
+  // Locked? Re-render and refuse.
+  if (lockedRemaining > 0) {
+    return c.html(renderLogin({
+      next, error: null,
+      currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+      requirePin: true, nameValue: slug, lockedUntilSec: lockedRemaining,
+    }), 429);
+  }
+
+  // Verify.
+  const ok = await verifyPin(pinRaw, {
+    hash: userRow!.pin_hash!,
+    salt: userRow!.pin_salt!,
+    iterations: userRow!.pin_iterations!,
+  });
+  if (!ok) {
+    const newAttempts = (userRow?.failed_attempts ?? 0) + 1;
+    const lockNow = newAttempts >= 5;
+    const lockIso = lockNow ? new Date(Date.now() + 15 * 60_000).toISOString() : null;
+    await recordFailedAttempt(c.env.DB, slug, lockIso);
+    const remaining = lockNow ? 15 * 60 : 0;
+    return c.html(renderLogin({
+      next, error: lockNow ? null : tx("login.wrongPin", c.var.lang),
+      currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+      requirePin: true, nameValue: slug, lockedUntilSec: remaining,
+    }), 401);
+  }
+
+  // Success.
+  await resetFailedAttempts(c.env.DB, slug);
   const token = await signUserToken(secret, slug, USER_TTL_SECONDS);
-  c.header(
-    "Set-Cookie",
-    `${USER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${USER_TTL_SECONDS}`,
-  );
-  const next = typeof nextRaw === "string" && nextRaw.startsWith("/") ? nextRaw : "/";
+  c.header("Set-Cookie",
+    `${USER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${USER_TTL_SECONDS}`);
   return c.redirect(next, 303);
+});
+
+// JSON login for iOS. Same logic as POST /login but returns structured
+// JSON instead of HTML/redirect. Cookies still travel via Set-Cookie.
+app.post("/api/login", async (c) => {
+  const secret = c.env.ADMIN_SESSION_SECRET || c.env.ADMIN_PASSWORD || "";
+  if (!secret) return c.json({ error: "Auth secret not configured" }, 500);
+  let body: { name?: unknown; pin?: unknown } = {};
+  try { body = await c.req.json(); } catch { /* fall through */ }
+  const name = typeof body.name === "string" ? body.name : "";
+  const pin = typeof body.pin === "string" ? body.pin : "";
+  const slug = slugifyUserName(name);
+  if (!slug) return c.json({ error: "Use letters, numbers, or hyphens (1–32 characters)." }, 400);
+
+  const userRow = await getUserRow(c.env.DB, slug);
+  const hasActivePin = !!(userRow?.pin_hash && userRow?.pin_salt && userRow?.pin_iterations);
+
+  if (!hasActivePin) {
+    if (pin) {
+      // PIN supplied but account doesn't have one — treat as ok, ignore PIN.
+    }
+    const token = await signUserToken(secret, slug, USER_TTL_SECONDS);
+    c.header("Set-Cookie",
+      `${USER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${USER_TTL_SECONDS}`);
+    return c.json({ ok: true, user: slug, requiresPin: false });
+  }
+
+  const lockedUntil = userRow?.locked_until ? Date.parse(userRow.locked_until) : 0;
+  const lockedRemaining = lockedUntil > Date.now()
+    ? Math.ceil((lockedUntil - Date.now()) / 1000)
+    : 0;
+
+  if (!pin) {
+    return c.json({ ok: false, requiresPin: true, locked: lockedRemaining > 0, retryAfter: lockedRemaining });
+  }
+  if (lockedRemaining > 0) {
+    return c.json({ ok: false, requiresPin: true, locked: true, retryAfter: lockedRemaining }, 429);
+  }
+  const ok = await verifyPin(pin, {
+    hash: userRow!.pin_hash!,
+    salt: userRow!.pin_salt!,
+    iterations: userRow!.pin_iterations!,
+  });
+  if (!ok) {
+    const newAttempts = (userRow?.failed_attempts ?? 0) + 1;
+    const lockNow = newAttempts >= 5;
+    const lockIso = lockNow ? new Date(Date.now() + 15 * 60_000).toISOString() : null;
+    await recordFailedAttempt(c.env.DB, slug, lockIso);
+    return c.json({
+      ok: false, requiresPin: true,
+      locked: lockNow,
+      retryAfter: lockNow ? 15 * 60 : 0,
+      error: "wrong_pin",
+    }, 401);
+  }
+  await resetFailedAttempts(c.env.DB, slug);
+  const token = await signUserToken(secret, slug, USER_TTL_SECONDS);
+  c.header("Set-Cookie",
+    `${USER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${USER_TTL_SECONDS}`);
+  return c.json({ ok: true, user: slug, requiresPin: false });
 });
 
 app.post("/logout", (c) => {
@@ -251,6 +401,322 @@ app.post("/logout", (c) => {
   );
   return c.redirect("/login", 303);
 });
+
+// ───────────────────────────── /me/security ─────────────────────────────
+
+app.get("/me/security", async (c) => {
+  if (!c.var.isSignedIn) return c.redirect("/login?next=/me/security", 302);
+  const row = await ensureUserRow(c.env.DB, c.var.currentUser);
+  const flashKey = c.req.query("flash");
+  const flash = flashFromKey(flashKey, c.var.lang);
+  return c.html(renderSecurity({
+    state: securityStateOf(row),
+    flash,
+    currentUser: c.var.currentUser,
+    isSignedIn: c.var.isSignedIn,
+    lang: c.var.lang,
+  }));
+});
+
+app.post("/me/security/start-pin", async (c) => {
+  if (!c.var.isSignedIn) return c.redirect("/login?next=/me/security", 302);
+  const userId = c.var.currentUser;
+  const form = await c.req.formData();
+  const email = String(form.get("email") || "").trim().toLowerCase();
+  const pin = String(form.get("pin") || "");
+  const pinConfirmRaw = form.get("pin_confirm");
+  const reuseActive = form.get("reuse_active") === "1";
+
+  if (!isValidEmail(email)) return c.redirect("/me/security?flash=bad_email", 303);
+
+  // Email uniqueness — reject if another user owns this email.
+  const taken = await getUserByEmail(c.env.DB, email);
+  if (taken && taken.user_id !== userId) {
+    return c.redirect("/me/security?flash=email_taken", 303);
+  }
+
+  // Two paths: brand-new PIN setup vs change-email-only (reuse current PIN).
+  let pinPayload: { hash: string; salt: string; iterations: number };
+  if (reuseActive) {
+    // Verify the user knows the active PIN, then reuse the existing hash.
+    const row = await ensureUserRow(c.env.DB, userId);
+    if (!row.pin_hash || !row.pin_salt || !row.pin_iterations) {
+      return c.redirect("/me/security?flash=bad_pin", 303);
+    }
+    const ok = await verifyPin(pin, { hash: row.pin_hash, salt: row.pin_salt, iterations: row.pin_iterations });
+    if (!ok) return c.redirect("/me/security?flash=wrong_pin", 303);
+    pinPayload = { hash: row.pin_hash, salt: row.pin_salt, iterations: row.pin_iterations };
+  } else {
+    if (!isValidPin(pin)) return c.redirect("/me/security?flash=bad_pin", 303);
+    const pinConfirm = typeof pinConfirmRaw === "string" ? pinConfirmRaw : "";
+    if (pin !== pinConfirm) return c.redirect("/me/security?flash=pin_mismatch", 303);
+    pinPayload = await hashPin(pin);
+  }
+
+  const token = generateToken();
+  const tokenHash = await hashToken(token);
+  const ttlMin = 30;
+  const expires = new Date(Date.now() + ttlMin * 60_000).toISOString();
+
+  await setPendingPin(c.env.DB, userId, {
+    pendingEmail: email,
+    pendingPinHash: pinPayload.hash,
+    pendingPinSalt: pinPayload.salt,
+    pendingPinIterations: pinPayload.iterations,
+    pendingTokenHash: tokenHash,
+    pendingExpiresAt: expires,
+  });
+
+  const link = `${baseUrl(c.req.url)}/me/security/verify?u=${encodeURIComponent(userId)}&token=${token}`;
+  const tpl = pinVerifyTemplate({ link, user: userId, ttlMinutes: ttlMin });
+  try {
+    await sendEmail(c.env, { to: email, ...tpl });
+  } catch (e) {
+    console.error("send pin verify email failed", errMsg(e));
+    return c.redirect("/me/security?flash=email_failed", 303);
+  }
+  return c.redirect("/me/security?flash=pending", 303);
+});
+
+app.get("/me/security/verify", async (c) => {
+  // Anyone with a valid link can land here — even if not signed in. Once
+  // verified we still require the user to be the same as the link's user_id
+  // before activating, so a stray click can't alter someone else's account.
+  const userId = c.req.query("u") || "";
+  const token = c.req.query("token") || "";
+  if (!userId || !token) return c.html(renderError("Invalid verification link", chrome(c)), 400);
+  const row = await getUserRow(c.env.DB, userId);
+  if (!row || !row.pending_token_hash || !row.pending_expires_at) {
+    return c.html(renderError("That verification link is invalid or has been used.", chrome(c)), 400);
+  }
+  if (Date.parse(row.pending_expires_at) < Date.now()) {
+    await clearPendingPin(c.env.DB, userId);
+    return c.html(renderError("That verification link has expired. Start over from the security page.", chrome(c)), 400);
+  }
+  const tokenOk = await verifyToken(token, row.pending_token_hash);
+  if (!tokenOk) return c.html(renderError("That verification link is invalid or has been used.", chrome(c)), 400);
+
+  const result = await activatePendingPin(c.env.DB, userId);
+  if (!result.ok) {
+    return c.html(renderError("Could not activate PIN.", chrome(c)), 500);
+  }
+
+  // If the user is already signed in as this account, send them back to
+  // /me/security with a success flash. Otherwise to /login.
+  if (c.var.isSignedIn && c.var.currentUser === userId) {
+    return c.redirect("/me/security?flash=activated", 303);
+  }
+  return c.redirect(`/login?next=/me/security`, 303);
+});
+
+app.post("/me/security/cancel-pin", async (c) => {
+  if (!c.var.isSignedIn) return c.redirect("/login?next=/me/security", 302);
+  await clearPendingPin(c.env.DB, c.var.currentUser);
+  return c.redirect("/me/security?flash=cancelled", 303);
+});
+
+app.post("/me/security/resend", async (c) => {
+  if (!c.var.isSignedIn) return c.redirect("/login?next=/me/security", 302);
+  const userId = c.var.currentUser;
+  const row = await ensureUserRow(c.env.DB, userId);
+  if (!row.pending_email) return c.redirect("/me/security", 303);
+
+  // Reissue token (don't re-hash PIN; reuse existing pending payload).
+  const token = generateToken();
+  const tokenHash = await hashToken(token);
+  const ttlMin = 30;
+  const expires = new Date(Date.now() + ttlMin * 60_000).toISOString();
+
+  await c.env.DB.prepare(
+    `UPDATE users SET pending_token_hash = ?2, pending_expires_at = ?3,
+                       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       WHERE user_id = ?1`,
+  ).bind(userId, tokenHash, expires).run();
+
+  const link = `${baseUrl(c.req.url)}/me/security/verify?u=${encodeURIComponent(userId)}&token=${token}`;
+  const tpl = pinVerifyTemplate({ link, user: userId, ttlMinutes: ttlMin });
+  try {
+    await sendEmail(c.env, { to: row.pending_email, ...tpl });
+  } catch (e) {
+    console.error("resend pin verify email failed", errMsg(e));
+    return c.redirect("/me/security?flash=email_failed", 303);
+  }
+  return c.redirect("/me/security?flash=pending", 303);
+});
+
+app.post("/me/security/change-pin", async (c) => {
+  if (!c.var.isSignedIn) return c.redirect("/login?next=/me/security", 302);
+  const userId = c.var.currentUser;
+  const form = await c.req.formData();
+  const current = String(form.get("current_pin") || "");
+  const next = String(form.get("new_pin") || "");
+  const confirm = String(form.get("new_pin_confirm") || "");
+
+  if (!isValidPin(next)) return c.redirect("/me/security?flash=bad_pin", 303);
+  if (next !== confirm) return c.redirect("/me/security?flash=pin_mismatch", 303);
+
+  const row = await ensureUserRow(c.env.DB, userId);
+  if (!row.pin_hash || !row.pin_salt || !row.pin_iterations) {
+    return c.redirect("/me/security?flash=bad_pin", 303);
+  }
+  const ok = await verifyPin(current, { hash: row.pin_hash, salt: row.pin_salt, iterations: row.pin_iterations });
+  if (!ok) return c.redirect("/me/security?flash=wrong_pin", 303);
+
+  const newHash = await hashPin(next);
+  await replaceActivePin(c.env.DB, userId, newHash);
+  return c.redirect("/me/security?flash=changed", 303);
+});
+
+app.post("/me/security/disable-pin", async (c) => {
+  if (!c.var.isSignedIn) return c.redirect("/login?next=/me/security", 302);
+  const userId = c.var.currentUser;
+  const form = await c.req.formData();
+  const pin = String(form.get("pin") || "");
+  const row = await ensureUserRow(c.env.DB, userId);
+  if (!row.pin_hash || !row.pin_salt || !row.pin_iterations) {
+    return c.redirect("/me/security", 303);
+  }
+  const ok = await verifyPin(pin, { hash: row.pin_hash, salt: row.pin_salt, iterations: row.pin_iterations });
+  if (!ok) return c.redirect("/me/security?flash=wrong_pin", 303);
+  await clearActivePin(c.env.DB, userId);
+  return c.redirect("/me/security?flash=disabled", 303);
+});
+
+// ───────────────────────────── Forgot / Reset PIN ─────────────────────────────
+
+app.get("/login/forgot", (c) => {
+  const nameValue = c.req.query("name") || "";
+  return c.html(renderForgotPin({
+    nameValue, currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+  }));
+});
+
+app.post("/login/forgot", async (c) => {
+  const form = await c.req.formData();
+  const name = String(form.get("name") || "");
+  const slug = slugifyUserName(name);
+  // Always render success message so we don't leak which names have email.
+  const flash = { kind: "success" as const, message: tx("forgot.flash.sent", c.var.lang) };
+  if (!slug) {
+    return c.html(renderForgotPin({
+      nameValue: name, flash, currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+    }));
+  }
+  const row = await getUserRow(c.env.DB, slug);
+  if (row && row.email && row.pin_hash) {
+    const token = generateToken();
+    const tokenHash = await hashToken(token);
+    const ttlMin = 60;
+    const expires = new Date(Date.now() + ttlMin * 60_000).toISOString();
+    await setRecoveryToken(c.env.DB, slug, tokenHash, expires);
+    const link = `${baseUrl(c.req.url)}/login/reset?u=${encodeURIComponent(slug)}&token=${token}`;
+    const tpl = pinRecoveryTemplate({ link, user: slug, ttlMinutes: ttlMin });
+    try {
+      await sendEmail(c.env, { to: row.email, ...tpl });
+    } catch (e) {
+      console.error("recovery email failed", errMsg(e));
+      // Still show generic success — better not to leak info.
+    }
+  }
+  return c.html(renderForgotPin({
+    nameValue: name, flash, currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+  }));
+});
+
+app.get("/login/reset", async (c) => {
+  const userId = c.req.query("u") || "";
+  const token = c.req.query("token") || "";
+  if (!userId || !token) return c.html(renderError("Invalid reset link", chrome(c)), 400);
+  const row = await getUserRow(c.env.DB, userId);
+  if (!row || !row.recovery_token_hash || !row.recovery_expires_at) {
+    return c.html(renderError("That reset link is invalid or has expired.", chrome(c)), 400);
+  }
+  if (Date.parse(row.recovery_expires_at) < Date.now()) {
+    await clearRecoveryToken(c.env.DB, userId);
+    return c.html(renderError("That reset link has expired.", chrome(c)), 400);
+  }
+  const ok = await verifyToken(token, row.recovery_token_hash);
+  if (!ok) return c.html(renderError("That reset link is invalid or has expired.", chrome(c)), 400);
+  return c.html(renderResetPin({
+    token, userName: userId,
+    currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang,
+  }));
+});
+
+app.post("/login/reset", async (c) => {
+  const form = await c.req.formData();
+  const token = String(form.get("token") || "");
+  const pin = String(form.get("pin") || "");
+  const confirm = String(form.get("pin_confirm") || "");
+  if (!isValidPin(pin) || pin !== confirm) {
+    return c.html(renderError("PIN must be 6 digits and match.", chrome(c)), 400);
+  }
+  // We don't have user_id in the form, only the token. Search users by
+  // token hash. (Token is single-use and rare so this is fine.)
+  const tokenHash = await hashToken(token);
+  const row = await c.env.DB.prepare(
+    "SELECT * FROM users WHERE recovery_token_hash = ?1 LIMIT 1",
+  ).bind(tokenHash).first<UserRow>();
+  if (!row || !row.recovery_expires_at) {
+    return c.html(renderError("That reset link is invalid or has expired.", chrome(c)), 400);
+  }
+  if (Date.parse(row.recovery_expires_at) < Date.now()) {
+    await clearRecoveryToken(c.env.DB, row.user_id);
+    return c.html(renderError("That reset link has expired.", chrome(c)), 400);
+  }
+  const newHash = await hashPin(pin);
+  await replaceActivePin(c.env.DB, row.user_id, newHash);
+  // Sign them in as a courtesy.
+  const secret = c.env.ADMIN_SESSION_SECRET || c.env.ADMIN_PASSWORD || "";
+  if (secret) {
+    const sessionToken = await signUserToken(secret, row.user_id, USER_TTL_SECONDS);
+    c.header("Set-Cookie",
+      `${USER_COOKIE}=${encodeURIComponent(sessionToken)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${USER_TTL_SECONDS}`);
+  }
+  return c.redirect("/me/security?flash=changed", 303);
+});
+
+// ─── helpers used by the security routes ───
+
+function isValidEmail(s: string): boolean {
+  return typeof s === "string" && s.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+function baseUrl(reqUrl: string): string {
+  const u = new URL(reqUrl);
+  return `${u.protocol}//${u.host}`;
+}
+
+function securityStateOf(row: UserRow): SecurityState {
+  if (row.pin_hash && row.email) {
+    return { kind: "active", email: row.email, pinSetAt: row.pin_set_at };
+  }
+  if (row.pending_email && row.pending_expires_at && Date.parse(row.pending_expires_at) > Date.now()) {
+    return { kind: "pending", pendingEmail: row.pending_email, expiresAtIso: row.pending_expires_at };
+  }
+  return { kind: "none" };
+}
+
+function flashFromKey(key: string | undefined, lang: Lang): { kind: "success" | "error"; message: string } | null {
+  if (!key) return null;
+  const map: Record<string, { kind: "success" | "error"; key: string }> = {
+    pending:        { kind: "success", key: "security.flash.pending" },
+    activated:      { kind: "success", key: "security.flash.activated" },
+    cancelled:      { kind: "success", key: "security.flash.cancelled" },
+    disabled:       { kind: "success", key: "security.flash.disabled" },
+    changed:        { kind: "success", key: "security.flash.changed" },
+    bad_email:      { kind: "error",   key: "security.flash.badEmail" },
+    bad_pin:        { kind: "error",   key: "security.flash.badPin" },
+    pin_mismatch:   { kind: "error",   key: "security.flash.pinMismatch" },
+    wrong_pin:      { kind: "error",   key: "security.flash.wrongPin" },
+    email_taken:    { kind: "error",   key: "security.flash.emailTaken" },
+    token_invalid:  { kind: "error",   key: "security.flash.tokenInvalid" },
+    email_failed:   { kind: "error",   key: "security.flash.emailFailed" },
+  };
+  const entry = map[key];
+  if (!entry) return null;
+  return { kind: entry.kind, message: tx(entry.key, lang) };
+}
 
 app.get("/interactions/view", async (c) => {
   try {
@@ -379,7 +845,7 @@ app.post("/api/interactions/list", async (c) => {
           response: req.response ?? "",
           image: key,
           date,
-        });
+        }, c.var.currentUser);
         saved++;
         ingestIds.push(id);
       } catch (err) {
@@ -416,6 +882,128 @@ app.post("/api/interactions/list", async (c) => {
     },
     201,
   );
+});
+
+// User-scoped delete: only removes captures owned by the signed-in user.
+// Accepts either form-encoded `ids[]` (browser form post) or JSON
+// `{ ids: string[] }` (iOS / fetch). On form posts, redirects back to
+// the originating page so we land where we came from.
+app.post("/api/interactions/delete", async (c) => {
+  if (!c.var.isSignedIn) {
+    return c.json({ error: "Sign in required" }, 401);
+  }
+  const userId = c.var.currentUser;
+
+  let ids: string[] = [];
+  let isJson = false;
+  let returnTo: string | null = null;
+
+  const ct = c.req.header("content-type") || "";
+  if (ct.includes("application/json")) {
+    isJson = true;
+    try {
+      const body = await c.req.json<{ ids?: unknown }>();
+      if (Array.isArray(body.ids)) {
+        ids = body.ids.filter((v): v is string => typeof v === "string" && v.length > 0);
+      }
+    } catch {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
+  } else {
+    const form = await c.req.formData().catch(() => null);
+    if (form) {
+      ids = form
+        .getAll("ids")
+        .filter((v): v is string => typeof v === "string" && v.length > 0);
+      const rt = form.get("return_to");
+      if (typeof rt === "string" && rt.startsWith("/")) returnTo = rt;
+    }
+  }
+
+  if (ids.length === 0) {
+    if (isJson) return c.json({ error: "No ids provided" }, 400);
+    return c.redirect(returnTo || "/interactions/view", 303);
+  }
+
+  let deleted = 0;
+  const errors: string[] = [];
+  for (const id of ids) {
+    try {
+      const row = await deleteInteractionCascade(c.env.DB, userId, id);
+      if (!row) continue;            // not owned, or already gone — skip silently
+      if (row.image) {
+        try { await c.env.MEDIA.delete(row.image); }
+        catch (e) { console.warn("r2 delete failed", row.image, errMsg(e)); }
+      }
+      deleted++;
+    } catch (e) {
+      errors.push(errMsg(e));
+    }
+  }
+
+  if (isJson) {
+    return c.json({ deleted, errors });
+  }
+  return c.redirect(returnTo || "/interactions/view", 303);
+});
+
+// ───────────────────────────── /api/analyze ─────────────────────────────
+//
+// Multi-provider vision analyse. iOS picks a model id; this dispatches:
+//   "@cf/..."     → Cloudflare Workers AI binding (free-tier eligible)
+//   "claude-..."  → Anthropic Messages API (ANTHROPIC_API_KEY)
+//   "gemini-..."  → Google Generative Language API (GEMINI_API_KEY)
+//
+// Auth required so we don't proxy random users' inference traffic on the
+// owner's CF/Anthropic/Gemini quota.
+
+app.get("/api/analyze/models", (c) => {
+  const list = availableModels(c.env);
+  return c.json({ models: list });
+});
+
+app.post("/api/analyze", async (c) => {
+  if (!c.var.isSignedIn) {
+    return c.json({ error: "Sign in required" }, 401);
+  }
+  let body: { model?: unknown; prompt?: unknown; image?: unknown; mediaType?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  const model = typeof body.model === "string" ? body.model : "";
+  const prompt = typeof body.prompt === "string" ? body.prompt : "";
+  const imageRaw = typeof body.image === "string" ? body.image : "";
+  const mediaType = typeof body.mediaType === "string" ? body.mediaType : undefined;
+
+  if (!model || !prompt || !imageRaw) {
+    return c.json({ error: "model, prompt, image are required" }, 400);
+  }
+
+  // Strip data URL prefix if present.
+  const m = imageRaw.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  const imageBase64 = m ? m[2] : imageRaw;
+  const detectedMediaType = m ? m[1] : (mediaType ?? "image/jpeg");
+
+  try {
+    const result = await analyseImage(c.env, {
+      model,
+      prompt,
+      imageBase64,
+      mediaType: detectedMediaType,
+      maxTokens: 2000,
+    });
+    return c.json({
+      response: result.text,
+      model: result.model,
+      provider: result.provider,
+      latency_ms: result.latencyMs,
+    });
+  } catch (e) {
+    console.error("analyse failed", errMsg(e));
+    return c.json({ error: errMsg(e) }, 502);
+  }
 });
 
 // ───────────────────────────── Admin ─────────────────────────────

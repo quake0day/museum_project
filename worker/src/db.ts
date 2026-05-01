@@ -186,26 +186,270 @@ export async function getStats(db: D1Database, userId: string): Promise<Stats> {
 export async function saveInteractionRow(
   db: D1Database,
   row: InteractionRow,
+  userId: string,
 ): Promise<void> {
   await db
     .prepare(
-      "INSERT OR REPLACE INTO interactions (id, response, image, date) VALUES (?1, ?2, ?3, ?4)",
+      "INSERT OR REPLACE INTO interactions (id, response, image, date, user_id) VALUES (?1, ?2, ?3, ?4, ?5)",
     )
-    .bind(row.id, row.response, row.image, row.date)
+    .bind(row.id, row.response, row.image, row.date, userId)
     .run();
 }
 
 export async function getInteractionById(
   db: D1Database,
   id: string,
-): Promise<InteractionRow | null> {
+): Promise<(InteractionRow & { user_id: string }) | null> {
   const row = await db
-    .prepare("SELECT id, response, image, date FROM interactions WHERE id = ?1")
+    .prepare("SELECT id, response, image, date, user_id FROM interactions WHERE id = ?1")
     .bind(id)
-    .first<InteractionRow>();
+    .first<InteractionRow & { user_id: string }>();
   return row ?? null;
 }
 
 export async function deleteInteraction(db: D1Database, id: string): Promise<void> {
   await db.prepare("DELETE FROM interactions WHERE id = ?1").bind(id).run();
+}
+
+/** Delete the interaction plus its wiki artefacts (exhibit page + edges).
+ *  Caller is responsible for the R2 image. Returns the row that was
+ *  deleted so the caller can decide what to do with it. */
+export async function deleteInteractionCascade(
+  db: D1Database,
+  userId: string,
+  id: string,
+): Promise<(InteractionRow & { user_id: string }) | null> {
+  const row = await db
+    .prepare("SELECT id, response, image, date, user_id FROM interactions WHERE id = ?1 AND user_id = ?2")
+    .bind(id, userId)
+    .first<InteractionRow & { user_id: string }>();
+  if (!row) return null;
+  const exhibitPath = `exhibits/${id}`;
+  // Order matters: links first (FTS triggers fire on wiki_pages delete).
+  await db.batch([
+    db.prepare("DELETE FROM wiki_links WHERE user_id = ?1 AND (src_path = ?2 OR dst_path = ?2)")
+      .bind(userId, exhibitPath),
+    db.prepare("DELETE FROM wiki_pages WHERE user_id = ?1 AND path = ?2")
+      .bind(userId, exhibitPath),
+    db.prepare("DELETE FROM interactions WHERE id = ?1 AND user_id = ?2")
+      .bind(id, userId),
+  ]);
+  return row;
+}
+
+// ─── User repository (auth metadata) ───
+
+export type UserRow = {
+  user_id: string;
+  email: string | null;
+  email_verified_at: string | null;
+  pending_email: string | null;
+  pending_pin_hash: string | null;
+  pending_token_hash: string | null;
+  pending_expires_at: string | null;
+  pin_hash: string | null;
+  pin_salt: string | null;
+  pin_iterations: number | null;
+  pin_set_at: string | null;
+  failed_attempts: number;
+  locked_until: string | null;
+  recovery_token_hash: string | null;
+  recovery_expires_at: string | null;
+};
+
+/** Get the user row, creating an empty stub if missing. Stubs let
+ *  /me/security render uniformly for fresh accounts. */
+export async function ensureUserRow(db: D1Database, userId: string): Promise<UserRow> {
+  await db
+    .prepare("INSERT OR IGNORE INTO users (user_id) VALUES (?1)")
+    .bind(userId)
+    .run();
+  const row = await db
+    .prepare("SELECT * FROM users WHERE user_id = ?1")
+    .bind(userId)
+    .first<UserRow>();
+  if (!row) throw new Error("user row missing after insert"); // shouldn't happen
+  return row;
+}
+
+export async function getUserRow(db: D1Database, userId: string): Promise<UserRow | null> {
+  const row = await db
+    .prepare("SELECT * FROM users WHERE user_id = ?1")
+    .bind(userId)
+    .first<UserRow>();
+  return row ?? null;
+}
+
+export async function getUserByEmail(db: D1Database, email: string): Promise<UserRow | null> {
+  const row = await db
+    .prepare("SELECT * FROM users WHERE email = ?1")
+    .bind(email)
+    .first<UserRow>();
+  return row ?? null;
+}
+
+/** Stage an email + pending PIN hash + verification token. Replaces any
+ *  prior pending verification. */
+export async function setPendingPin(
+  db: D1Database,
+  userId: string,
+  args: {
+    pendingEmail: string;
+    pendingPinHash: string;       // base64url
+    pendingPinSalt: string;       // base64url
+    pendingPinIterations: number;
+    pendingTokenHash: string;     // SHA-256 of raw token
+    pendingExpiresAt: string;     // ISO8601
+  },
+): Promise<void> {
+  // We're squeezing extra columns into pending_pin_hash by encoding salt &
+  // iterations alongside the hash. Simpler than 3 new columns since this
+  // staging area is short-lived (~30 min).
+  const pinPayload = JSON.stringify({
+    h: args.pendingPinHash,
+    s: args.pendingPinSalt,
+    i: args.pendingPinIterations,
+  });
+  await db.prepare(
+    `UPDATE users
+        SET pending_email = ?2,
+            pending_pin_hash = ?3,
+            pending_token_hash = ?4,
+            pending_expires_at = ?5,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId, args.pendingEmail, pinPayload, args.pendingTokenHash, args.pendingExpiresAt).run();
+}
+
+/** Promote staged pending → active after the user clicks the email link. */
+export async function activatePendingPin(
+  db: D1Database,
+  userId: string,
+): Promise<{ ok: true; email: string } | { ok: false; reason: string }> {
+  const row = await getUserRow(db, userId);
+  if (!row || !row.pending_email || !row.pending_pin_hash) {
+    return { ok: false, reason: "no_pending" };
+  }
+  let payload: { h: string; s: string; i: number };
+  try {
+    payload = JSON.parse(row.pending_pin_hash);
+  } catch {
+    return { ok: false, reason: "bad_payload" };
+  }
+  await db.prepare(
+    `UPDATE users
+        SET email = ?2,
+            email_verified_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+            pin_hash = ?3,
+            pin_salt = ?4,
+            pin_iterations = ?5,
+            pin_set_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+            pending_email = NULL,
+            pending_pin_hash = NULL,
+            pending_token_hash = NULL,
+            pending_expires_at = NULL,
+            failed_attempts = 0,
+            locked_until = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId, row.pending_email, payload.h, payload.s, payload.i).run();
+  return { ok: true, email: row.pending_email };
+}
+
+/** Clear pending verification (cancel set-PIN, or expired). */
+export async function clearPendingPin(db: D1Database, userId: string): Promise<void> {
+  await db.prepare(
+    `UPDATE users
+        SET pending_email = NULL,
+            pending_pin_hash = NULL,
+            pending_token_hash = NULL,
+            pending_expires_at = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId).run();
+}
+
+/** Remove an active PIN (disabling it). Email stays bound for recovery. */
+export async function clearActivePin(db: D1Database, userId: string): Promise<void> {
+  await db.prepare(
+    `UPDATE users
+        SET pin_hash = NULL,
+            pin_salt = NULL,
+            pin_iterations = NULL,
+            pin_set_at = NULL,
+            failed_attempts = 0,
+            locked_until = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId).run();
+}
+
+export async function recordFailedAttempt(
+  db: D1Database,
+  userId: string,
+  lockUntilIso: string | null,
+): Promise<void> {
+  await db.prepare(
+    `UPDATE users
+        SET failed_attempts = failed_attempts + 1,
+            locked_until = COALESCE(?2, locked_until),
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId, lockUntilIso).run();
+}
+
+export async function resetFailedAttempts(db: D1Database, userId: string): Promise<void> {
+  await db.prepare(
+    `UPDATE users
+        SET failed_attempts = 0,
+            locked_until = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId).run();
+}
+
+export async function setRecoveryToken(
+  db: D1Database,
+  userId: string,
+  tokenHash: string,
+  expiresAtIso: string,
+): Promise<void> {
+  await db.prepare(
+    `UPDATE users
+        SET recovery_token_hash = ?2,
+            recovery_expires_at = ?3,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId, tokenHash, expiresAtIso).run();
+}
+
+export async function clearRecoveryToken(db: D1Database, userId: string): Promise<void> {
+  await db.prepare(
+    `UPDATE users
+        SET recovery_token_hash = NULL,
+            recovery_expires_at = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId).run();
+}
+
+/** Replace the active PIN (after recovery, or change). */
+export async function replaceActivePin(
+  db: D1Database,
+  userId: string,
+  hash: { hash: string; salt: string; iterations: number },
+): Promise<void> {
+  await db.prepare(
+    `UPDATE users
+        SET pin_hash = ?2,
+            pin_salt = ?3,
+            pin_iterations = ?4,
+            pin_set_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+            failed_attempts = 0,
+            locked_until = NULL,
+            recovery_token_hash = NULL,
+            recovery_expires_at = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE user_id = ?1`,
+  ).bind(userId, hash.hash, hash.salt, hash.iterations).run();
 }

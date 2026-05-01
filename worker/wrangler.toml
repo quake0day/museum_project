@@ -32,6 +32,12 @@ migrations_dir = "migrations"
 binding = "MEDIA"
 bucket_name = "museum-media"
 
+# Cloudflare Workers AI — used by /api/analyze for the @cf/* vision models
+# (Llama 3.2 Vision, Gemma 3, etc.). No extra secret required; runs on the
+# worker's own CF account quota.
+[ai]
+binding = "AI"
+
 [observability]
 enabled = true
 

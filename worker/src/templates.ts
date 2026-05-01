@@ -37,10 +37,12 @@ function layout(opts: {
   const L = (path: string) => linkPath(lang, path);
   const wikiHref = L(`/wiki/${encodeURIComponent(userForLink)}/index`);
   const userPill = opts.isSignedIn && opts.currentUser
-    ? `<form method="POST" action="${L("/logout")}" class="user-pill" title="${tx("nav.signout", lang)}" data-user-pill>
-        <span class="user-pill-name">@${escapeHtml(opts.currentUser)}</span>
-        <button type="submit" class="user-pill-out" aria-label="${tx("nav.signout", lang)}">↩</button>
-      </form>`
+    ? `<span class="user-pill" data-user-pill>
+        <a class="user-pill-name" href="${L("/me/security")}" title="${tx("nav.security", lang)}">@${escapeHtml(opts.currentUser)}</a>
+        <form method="POST" action="${L("/logout")}" class="user-pill-form" title="${tx("nav.signout", lang)}">
+          <button type="submit" class="user-pill-out" aria-label="${tx("nav.signout", lang)}">↩</button>
+        </form>
+      </span>`
     : `<span class="user-pill-slot" data-user-pill></span>`;
 
   return `<!doctype html>
@@ -375,25 +377,51 @@ export function renderLogin(opts: {
   currentUser: string;
   isSignedIn: boolean;
   lang?: Lang;
+  requirePin?: boolean;     // step 2 — user has an active PIN
+  nameValue?: string;       // prefill on step 2 / re-render after error
+  lockedUntilSec?: number;  // remaining seconds in lockout (0 = not locked)
 }): string {
   const { next, error, currentUser, isSignedIn } = opts;
   const lang: Lang = opts.lang ?? "en";
   const L = (p: string) => linkPath(lang, p);
   const safeNext = next.startsWith("/") ? next : "/";
+  const requirePin = !!opts.requirePin;
+  const nameValue = opts.nameValue ?? "";
+  const lockedFor = Math.max(0, Math.floor(opts.lockedUntilSec ?? 0));
+
+  const lockedBanner = lockedFor > 0
+    ? `<p class="login-error" role="alert">${tx("login.locked", lang).replace("%s", String(Math.ceil(lockedFor / 60)))}</p>`
+    : "";
+
+  const nameField = requirePin
+    ? `<input id="login-name" type="text" name="name" value="${escapeHtml(nameValue)}" readonly autocomplete="username" />
+       <p class="login-name-row"><span class="muted">${tx("login.signingInAs", lang)} <strong>${escapeHtml(nameValue)}</strong></span> <a href="${L("/login")}" class="login-switch">${tx("login.switchUser", lang)}</a></p>`
+    : `<input id="login-name" type="text" name="name" value="${escapeHtml(nameValue)}" placeholder="${tx("login.placeholder", lang)}" autofocus required maxlength="32" autocomplete="username" />`;
+
+  const pinField = requirePin
+    ? `<label for="login-pin" class="login-label">${tx("login.pinLabel", lang)}</label>
+       <input id="login-pin" type="text" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required ${lockedFor > 0 ? "disabled" : "autofocus"} autocomplete="one-time-code" />
+       <p class="login-forgot"><a href="${L(`/login/forgot?name=${encodeURIComponent(nameValue)}`)}">${tx("login.forgot", lang)}</a></p>`
+    : "";
+
+  const submitLabel = requirePin ? tx("login.submitPin", lang) : tx("login.submit", lang);
+
   const body = `
   <section class="login-screen">
     <div class="container login-inner">
       <p class="eyebrow">${ti("login.eyebrow")}</p>
-      <h1>${ti("login.title")}</h1>
-      <p class="muted">${ti("login.subtitle")}</p>
+      <h1>${requirePin ? tx("login.pinTitle", lang) : ti("login.title")}</h1>
+      <p class="muted">${requirePin ? tx("login.pinSubtitle", lang) : ti("login.subtitle")}</p>
+      ${lockedBanner}
       ${error ? `<p class="login-error">${escapeHtml(error)}</p>` : ""}
       <form method="POST" action="${L("/login")}" class="login-form">
         <input type="hidden" name="next" value="${escapeHtml(safeNext)}" />
         <label for="login-name" class="login-label">${ti("login.label")}</label>
-        <input id="login-name" type="text" name="name" placeholder="${tx("login.placeholder", "en")}" autofocus required maxlength="32" autocomplete="username" />
-        <button class="btn btn-primary" type="submit">${ti("login.submit")}</button>
+        ${nameField}
+        ${pinField}
+        <button class="btn btn-primary" type="submit" ${lockedFor > 0 ? "disabled" : ""}>${submitLabel}</button>
       </form>
-      <p class="muted login-hint">${ti("login.hint")}</p>
+      ${requirePin ? "" : `<p class="muted login-hint">${ti("login.hint")}</p>`}
     </div>
   </section>
   <style>
@@ -433,8 +461,233 @@ export function renderLogin(opts: {
       font-size: .9rem;
     }
     .login-hint { font-size: .82rem; max-width: 360px; margin: 1rem auto 0; }
+    .login-name-row { display:flex; justify-content: space-between; align-items: center; gap:.5rem; font-size:.82rem; margin: .35rem 0 .5rem; }
+    .login-switch { font-size: .82rem; color: var(--accent-ink); text-decoration: underline; }
+    .login-form input[readonly] { background: var(--bg-soft); color: var(--ink-soft); cursor: default; }
+    .login-form input[name="pin"] {
+      letter-spacing: .6em;
+      font-variant-numeric: tabular-nums;
+      font-size: 1.4rem;
+      padding-left: 1rem;
+    }
+    .login-forgot { text-align: right; font-size: .82rem; margin: -.25rem 0 .25rem; }
+    .login-forgot a { color: var(--accent-ink); text-decoration: underline; }
   </style>`;
   return layout({ title: "Sign in — MuseIQ", body, currentUser, isSignedIn, lang });
+}
+
+// ─── Security: /me/security ───
+//
+// Three states: (1) no email + no PIN → setup form, (2) pending verification
+// → "we sent an email" panel with cancel/resend, (3) PIN active → manage
+// section (change email, change PIN, disable PIN).
+export type SecurityState =
+  | { kind: "none" }
+  | { kind: "pending"; pendingEmail: string; expiresAtIso: string }
+  | { kind: "active"; email: string; pinSetAt: string | null };
+
+export function renderSecurity(opts: {
+  state: SecurityState;
+  flash?: { kind: "success" | "error"; message: string } | null;
+  currentUser: string;
+  isSignedIn: boolean;
+  lang?: Lang;
+}): string {
+  const lang: Lang = opts.lang ?? "en";
+  const { state, currentUser, isSignedIn } = opts;
+  const flash = opts.flash ?? null;
+
+  const flashHtml = flash
+    ? `<div class="flash flash-${flash.kind}">${escapeHtml(flash.message)}</div>`
+    : "";
+
+  let panelHtml = "";
+
+  if (state.kind === "none") {
+    panelHtml = `
+      <h2>${tx("security.setup.title", lang)}</h2>
+      <p class="muted">${tx("security.setup.subtitle", lang)}</p>
+      <form method="POST" action="/me/security/start-pin" class="sec-form">
+        <label class="sec-label" for="sec-email">${tx("security.email.label", lang)}</label>
+        <input id="sec-email" type="email" name="email" required maxlength="120" autocomplete="email" placeholder="you@example.com" />
+
+        <label class="sec-label" for="sec-pin">${tx("security.pin.label", lang)}</label>
+        <input id="sec-pin" type="text" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="new-password" placeholder="••••••" />
+
+        <label class="sec-label" for="sec-pin-confirm">${tx("security.pin.confirm", lang)}</label>
+        <input id="sec-pin-confirm" type="text" name="pin_confirm" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required />
+
+        <button type="submit" class="btn btn-primary">${tx("security.setup.button", lang)}</button>
+      </form>
+    `;
+  } else if (state.kind === "pending") {
+    panelHtml = `
+      <h2>${tx("security.pending.title", lang)}</h2>
+      <p class="muted">${tx("security.pending.subtitle", lang).replace("%s", `<strong>${escapeHtml(state.pendingEmail)}</strong>`)}</p>
+      <p class="muted small">${tx("security.pending.checkSpam", lang)}</p>
+      <div class="sec-actions">
+        <form method="POST" action="/me/security/resend">
+          <button type="submit" class="btn">${tx("security.pending.resend", lang)}</button>
+        </form>
+        <form method="POST" action="/me/security/cancel-pin">
+          <button type="submit" class="btn btn-ghost">${tx("security.pending.cancel", lang)}</button>
+        </form>
+      </div>
+    `;
+  } else {
+    panelHtml = `
+      <h2>${tx("security.active.title", lang)}</h2>
+      <p class="muted">${tx("security.active.subtitle", lang).replace("%s", `<strong>${escapeHtml(state.email)}</strong>`)}</p>
+
+      <details class="sec-fold">
+        <summary>${tx("security.changePin.title", lang)}</summary>
+        <form method="POST" action="/me/security/change-pin" class="sec-form">
+          <label class="sec-label" for="sec-pin-old">${tx("security.changePin.current", lang)}</label>
+          <input id="sec-pin-old" type="text" name="current_pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="current-password" />
+          <label class="sec-label" for="sec-pin-new">${tx("security.changePin.new", lang)}</label>
+          <input id="sec-pin-new" type="text" name="new_pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="new-password" />
+          <label class="sec-label" for="sec-pin-new-confirm">${tx("security.changePin.confirm", lang)}</label>
+          <input id="sec-pin-new-confirm" type="text" name="new_pin_confirm" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required />
+          <button type="submit" class="btn">${tx("security.changePin.button", lang)}</button>
+        </form>
+      </details>
+
+      <details class="sec-fold">
+        <summary>${tx("security.changeEmail.title", lang)}</summary>
+        <form method="POST" action="/me/security/start-pin" class="sec-form">
+          <p class="muted small">${tx("security.changeEmail.note", lang)}</p>
+          <label class="sec-label" for="sec-email-2">${tx("security.email.label", lang)}</label>
+          <input id="sec-email-2" type="email" name="email" required maxlength="120" autocomplete="email" />
+          <label class="sec-label" for="sec-pin-2">${tx("security.changeEmail.pinLabel", lang)}</label>
+          <input id="sec-pin-2" type="text" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="current-password" placeholder="${tx("security.changeEmail.pinPlaceholder", lang)}" />
+          <input id="sec-pin-confirm-2" type="hidden" name="pin_confirm" />
+          <input type="hidden" name="reuse_active" value="1" />
+          <button type="submit" class="btn">${tx("security.changeEmail.button", lang)}</button>
+        </form>
+      </details>
+
+      <details class="sec-fold">
+        <summary class="sec-danger">${tx("security.disable.title", lang)}</summary>
+        <form method="POST" action="/me/security/disable-pin" class="sec-form" onsubmit="return confirm(${JSON.stringify(tx("security.disable.confirm", lang))});">
+          <p class="muted small">${tx("security.disable.note", lang)}</p>
+          <label class="sec-label" for="sec-disable-pin">${tx("security.changePin.current", lang)}</label>
+          <input id="sec-disable-pin" type="text" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="current-password" />
+          <button type="submit" class="btn btn-danger">${tx("security.disable.button", lang)}</button>
+        </form>
+      </details>
+    `;
+  }
+
+  const body = `
+  <section class="security-screen">
+    <div class="container sec-inner">
+      <p class="eyebrow">${tx("security.eyebrow", lang)}</p>
+      <h1>${tx("security.title", lang)}</h1>
+      <p class="muted">${tx("security.subtitle", lang).replace("%s", `<strong>${escapeHtml(currentUser)}</strong>`)}</p>
+      ${flashHtml}
+      <div class="sec-card">${panelHtml}</div>
+    </div>
+  </section>
+  <style>
+    .security-screen { padding: 3rem 1.5rem; }
+    .sec-inner { max-width: 560px; margin: 0 auto; }
+    .sec-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.6rem 1.4rem; margin-top: 1.4rem; box-shadow: var(--shadow-md); }
+    .sec-form { display: flex; flex-direction: column; gap: .6rem; margin-top: 1rem; }
+    .sec-label { font-size: .82rem; color: var(--ink-soft); }
+    .sec-form input { padding: .65rem .8rem; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--bg); font-family: inherit; color: var(--ink); }
+    .sec-form input[name$="pin"], .sec-form input[name="current_pin"], .sec-form input[name="new_pin"], .sec-form input[name="new_pin_confirm"], .sec-form input[name="pin_confirm"] {
+      letter-spacing: .4em; font-variant-numeric: tabular-nums; text-align: center; font-size: 1.15rem;
+    }
+    .sec-form button { margin-top: .6rem; align-self: flex-start; }
+    .sec-actions { display: flex; gap: .6rem; margin-top: 1rem; }
+    .sec-fold { border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 1rem; }
+    .sec-fold > summary { cursor: pointer; font-weight: 600; padding: .25rem 0; }
+    .sec-fold[open] > summary { color: var(--accent-ink); }
+    .sec-danger { color: #b53b32; }
+    .btn-danger { background: #b53b32; color: #fff; border: none; }
+    .btn-danger:hover { background: #921e1e; }
+    .btn-ghost { background: transparent; }
+    .flash { padding: .75rem 1rem; border-radius: var(--radius-sm); margin: 1rem 0; font-size: .92rem; }
+    .flash-success { background: #e6f4ea; border: 1px solid #a8d5b9; color: #1e5631; }
+    .flash-error { background: #FEE2E2; border: 1px solid #FCA5A5; color: #991B1B; }
+    .small { font-size: .82rem; }
+  </style>`;
+  return layout({ title: "Security — MuseIQ", body, currentUser, isSignedIn, lang });
+}
+
+// ─── Forgot PIN: /login/forgot ───
+export function renderForgotPin(opts: {
+  nameValue?: string;
+  flash?: { kind: "success" | "error"; message: string } | null;
+  currentUser: string;
+  isSignedIn: boolean;
+  lang?: Lang;
+}): string {
+  const lang: Lang = opts.lang ?? "en";
+  const flashHtml = opts.flash
+    ? `<div class="flash flash-${opts.flash.kind}">${escapeHtml(opts.flash.message)}</div>`
+    : "";
+  const body = `
+  <section class="login-screen">
+    <div class="container login-inner">
+      <p class="eyebrow">${tx("forgot.eyebrow", lang)}</p>
+      <h1>${tx("forgot.title", lang)}</h1>
+      <p class="muted">${tx("forgot.subtitle", lang)}</p>
+      ${flashHtml}
+      <form method="POST" action="/login/forgot" class="login-form">
+        <label for="forgot-name" class="login-label">${ti("login.label")}</label>
+        <input id="forgot-name" type="text" name="name" required maxlength="32" value="${escapeHtml(opts.nameValue ?? "")}" autofocus autocomplete="username" />
+        <button type="submit" class="btn btn-primary">${tx("forgot.button", lang)}</button>
+      </form>
+      <p class="muted login-hint"><a href="${linkPath(lang, "/login")}">${tx("forgot.backToLogin", lang)}</a></p>
+    </div>
+  </section>
+  <style>
+    .flash { padding: .75rem 1rem; border-radius: var(--radius-sm); margin: 1rem auto; font-size: .92rem; max-width: 380px; }
+    .flash-success { background: #e6f4ea; border: 1px solid #a8d5b9; color: #1e5631; }
+    .flash-error { background: #FEE2E2; border: 1px solid #FCA5A5; color: #991B1B; }
+  </style>`;
+  return layout({ title: "Forgot PIN — MuseIQ", body, currentUser: opts.currentUser, isSignedIn: opts.isSignedIn, lang });
+}
+
+// ─── Reset PIN: /login/reset?token=... ───
+export function renderResetPin(opts: {
+  token: string;
+  userName: string;
+  flash?: { kind: "error"; message: string } | null;
+  currentUser: string;
+  isSignedIn: boolean;
+  lang?: Lang;
+}): string {
+  const lang: Lang = opts.lang ?? "en";
+  const flashHtml = opts.flash
+    ? `<div class="flash flash-${opts.flash.kind}">${escapeHtml(opts.flash.message)}</div>`
+    : "";
+  const body = `
+  <section class="login-screen">
+    <div class="container login-inner">
+      <p class="eyebrow">${tx("reset.eyebrow", lang)}</p>
+      <h1>${tx("reset.title", lang)}</h1>
+      <p class="muted">${tx("reset.subtitle", lang).replace("%s", `<strong>${escapeHtml(opts.userName)}</strong>`)}</p>
+      ${flashHtml}
+      <form method="POST" action="/login/reset" class="login-form">
+        <input type="hidden" name="token" value="${escapeHtml(opts.token)}" />
+        <label class="login-label" for="reset-pin">${tx("reset.newPin", lang)}</label>
+        <input id="reset-pin" type="text" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus autocomplete="new-password" />
+        <label class="login-label" for="reset-pin-confirm">${tx("reset.confirmPin", lang)}</label>
+        <input id="reset-pin-confirm" type="text" name="pin_confirm" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required />
+        <button type="submit" class="btn btn-primary">${tx("reset.button", lang)}</button>
+      </form>
+    </div>
+  </section>
+  <style>
+    .login-form input[name="pin"], .login-form input[name="pin_confirm"] {
+      letter-spacing: .6em; font-variant-numeric: tabular-nums; font-size: 1.4rem; text-align: center;
+    }
+    .flash { padding: .75rem 1rem; border-radius: var(--radius-sm); margin: 1rem auto; font-size: .92rem; max-width: 380px; }
+    .flash-error { background: #FEE2E2; border: 1px solid #FCA5A5; color: #991B1B; }
+  </style>`;
+  return layout({ title: "Reset PIN — MuseIQ", body, currentUser: opts.currentUser, isSignedIn: opts.isSignedIn, lang });
 }
 
 const DOMAIN_EMOJI: Record<string, string> = {
@@ -640,10 +893,16 @@ export function renderList(data: {
                 return `<span class="card-tag">${labelHtml}</span>`;
               }).join("")}</div>`
             : "";
+          const deleteBtn = data.isSignedIn
+            ? `<button type="button" class="card-delete" data-delete-id="${escapeHtml(it.id)}" aria-label="${tx("captures.delete", lang)}" title="${tx("captures.delete", lang)}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              </button>`
+            : "";
           return `
       ${cardOpen}
         <div class="card-media">
           <img src="${src}" alt="Exhibit response" loading="lazy" decoding="async" />
+          ${deleteBtn}
         </div>
         <div class="card-body">
           ${domain ? `<span class="domain-chip">${domainEmoji} ${ti(domain === "science" ? "domain.naturalScience" : `domain.${domain}`)}</span>` : ""}
@@ -766,7 +1025,75 @@ export function renderList(data: {
       font-size: .7rem;
       line-height: 1.4;
     }
+    .card-media { position: relative; }
+    .card-delete {
+      position: absolute;
+      top: .5rem;
+      right: .5rem;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(20, 20, 20, .55);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      color: #fff;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transform: scale(.92);
+      transition: opacity .15s ease, transform .15s ease, background .15s ease;
+      z-index: 2;
+      padding: 0;
+    }
+    .card-delete svg { width: 16px; height: 16px; display: block; }
+    .card:hover .card-delete,
+    .card:focus-within .card-delete,
+    .card-delete:focus-visible { opacity: 1; transform: scale(1); }
+    .card-delete:hover { background: #b53b32; }
+    .card-delete:active { transform: scale(.92); }
+    @media (hover: none) {
+      .card-delete { opacity: .85; transform: scale(1); }
+    }
   </style>
+
+  ${data.isSignedIn ? `<script>
+    (function() {
+      var msg = ${JSON.stringify(tx("captures.deleteConfirm", lang))};
+      var failMsg = ${JSON.stringify(tx("captures.deleteFailed", lang))};
+      document.addEventListener('click', async function(e) {
+        var btn = e.target.closest && e.target.closest('.card-delete');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var id = btn.getAttribute('data-delete-id');
+        if (!id) return;
+        if (!window.confirm(msg)) return;
+        btn.disabled = true;
+        try {
+          var res = await fetch('/api/interactions/delete', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: [id] }),
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          var card = btn.closest('.card');
+          if (card) {
+            card.style.transition = 'opacity .25s ease, transform .25s ease';
+            card.style.opacity = '0';
+            card.style.transform = 'scale(.96)';
+            setTimeout(function() { card.remove(); }, 260);
+          }
+        } catch (err) {
+          btn.disabled = false;
+          window.alert(failMsg);
+        }
+      });
+    })();
+  </script>` : ""}
   `;
   return layout({
     title: query ? `"${query}" — Interactions` : "Interactions — MuseIQ",
