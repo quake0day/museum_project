@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import {
-  deleteInteraction,
   deleteInteractionCascade,
   getInteractionById,
   getInteractions,
@@ -1103,7 +1102,9 @@ app.post("/admin/delete", async (c) => {
       } catch (e) {
         console.error("r2 delete failed", row.image, errMsg(e));
       }
-      await deleteInteraction(c.env.DB, id);
+      // Cascade: removes the exhibit's wiki_pages + wiki_links rows along
+      // with the interaction, scoped to its actual owner (not just demo).
+      await deleteInteractionCascade(c.env.DB, row.user_id, id);
     }
 
     // Clamp page to last valid page after deletion so the user lands on a
@@ -1340,8 +1341,8 @@ app.post("/admin/ingest/:id", async (c) => {
     return c.html(renderError("DEEPSEEK_API_KEY not configured"), 500);
   }
   try {
-    await runSingleIngest(c.env, id);
-    return c.redirect(`/wiki/${encodeURIComponent(c.var.currentUser)}/exhibits/${encodeURIComponent(id)}`, 302);
+    const ownerId = await runSingleIngest(c.env, id);
+    return c.redirect(`/wiki/${encodeURIComponent(ownerId)}/exhibits/${encodeURIComponent(id)}`, 302);
   } catch (err) {
     console.error("admin ingest error", err);
     // Make sure the row never gets stuck at 'running' on an unhandled throw.
@@ -1363,6 +1364,75 @@ app.get("/admin/lint/:user", async (c) => {
     return c.html(renderLintReport({ user, findings }));
   } catch (err) {
     console.error("lint error", err);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
+  }
+});
+
+// Drop orphan exhibit wiki rows that were written under the default
+// tenant before the runSingleIngest user_id fix — i.e. wiki_pages /
+// wiki_links rows at user_id=DEFAULT for paths `exhibits/<id>` whose
+// underlying interaction is actually owned by a non-default user.
+// Idempotent; safe to run multiple times.
+app.post("/admin/cleanup-misowned", async (c) => {
+  if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
+  try {
+    const defaultUser = defaultUserId(c.env);
+    const linkRes = await c.env.DB
+      .prepare(
+        `DELETE FROM wiki_links
+          WHERE user_id = ?1
+            AND src_path IN (
+              SELECT 'exhibits/' || i.id FROM interactions i WHERE i.user_id != ?1
+            )`,
+      )
+      .bind(defaultUser)
+      .run();
+    const pageRes = await c.env.DB
+      .prepare(
+        `DELETE FROM wiki_pages
+          WHERE user_id = ?1
+            AND path IN (
+              SELECT 'exhibits/' || i.id FROM interactions i WHERE i.user_id != ?1
+            )`,
+      )
+      .bind(defaultUser)
+      .run();
+    const linksDel = (linkRes.meta as { changes?: number } | undefined)?.changes ?? 0;
+    const pagesDel = (pageRes.meta as { changes?: number } | undefined)?.changes ?? 0;
+    return c.html(renderError(`Cleaned up ${pagesDel} orphan exhibit pages and ${linksDel} orphan links from ${defaultUser}.`), 200);
+  } catch (err) {
+    console.error("cleanup-misowned error", err);
+    return c.html(renderError(errMsg(err), chrome(c)), 500);
+  }
+});
+
+// Reingest exhibits that were ingested under the wrong tenant before the
+// runSingleIngest user_id fix landed — i.e. rows owned by a non-demo
+// user but whose wiki_pages were written under "demo". Optional
+// ?user=<slug> form scopes to one tenant; otherwise hits everyone but
+// the default. Marks rows pending so the cron drains them naturally.
+app.post("/admin/reingest-misowned", async (c) => {
+  if (!(await isAdminAuthed(c.env, c.req.raw))) return c.redirect("/admin", 302);
+  if (!c.env.DEEPSEEK_API_KEY) {
+    return c.html(renderError("DEEPSEEK_API_KEY not configured"), 500);
+  }
+  try {
+    const onlyUser = (c.req.query("user") ?? "").trim();
+    const defaultUser = defaultUserId(c.env);
+    const res = onlyUser
+      ? await c.env.DB
+          .prepare("UPDATE interactions SET analysis_status = 'pending' WHERE user_id = ?1 AND analysis_status = 'done' RETURNING id")
+          .bind(onlyUser)
+          .all<{ id: string }>()
+      : await c.env.DB
+          .prepare("UPDATE interactions SET analysis_status = 'pending' WHERE user_id != ?1 AND analysis_status = 'done' RETURNING id")
+          .bind(defaultUser)
+          .all<{ id: string }>();
+    const n = res.results?.length ?? 0;
+    const scope = onlyUser ? `user=${onlyUser}` : `all non-${defaultUser}`;
+    return c.html(renderError(`Marked ${n} exhibits pending (${scope}). Cron will drain ~${CRON_BATCH_SIZE}/min; estimated ~${Math.ceil(n / CRON_BATCH_SIZE)} min.`), 200);
+  } catch (err) {
+    console.error("reingest-misowned error", err);
     return c.html(renderError(errMsg(err), chrome(c)), 500);
   }
 });
@@ -1483,9 +1553,9 @@ async function scheduled(_event: ScheduledEvent, env: Bindings, ctx: ExecutionCo
     // Once all exhibits are at v4, switch to draining stale entity pages
     // (concept/place/period/etc) that survived previous re-ingests without
     // being themselves bilingualized — these don't go through the full
-    // exhibit ingest, just one focused translation call each.
-    const userId = defaultUserId(env);
-    const stale = await findStaleEntityPages(env.DB, userId, CRON_BATCH_SIZE);
+    // exhibit ingest, just one focused translation call each. Scan all
+    // tenants so every user's pages get drained, not just the default one.
+    const stale = await findStaleEntityPages(env.DB, null, CRON_BATCH_SIZE);
     if (!stale.length) {
       console.log("cron: nothing to ingest or translate");
       return;
@@ -1542,17 +1612,18 @@ function chrome(c: { var: Variables }): { currentUser: string; isSignedIn: boole
   return { currentUser: c.var.currentUser, isSignedIn: c.var.isSignedIn, lang: c.var.lang };
 }
 
-async function runSingleIngest(env: Bindings, id: string): Promise<void> {
+async function runSingleIngest(env: Bindings, id: string): Promise<string> {
   const ai = getAiProvider(env);
   const row = await getInteractionById(env.DB, id);
   if (!row) throw new Error(`interaction not found: ${id}`);
   await ingestExhibit(ai, env.DB, {
     exhibitId: id,
-    userId: defaultUserId(env),
+    userId: row.user_id,
     description: row.response ?? "",
     capturedAt: row.date ?? new Date().toISOString(),
     imageHint: row.image ?? undefined,
   });
+  return row.user_id;
 }
 
 async function ingestBatch(env: Bindings, ids: string[]): Promise<void> {

@@ -129,22 +129,35 @@ function yamlScalar(v: unknown): string {
 }
 
 // Find entity pages that haven't been bilingualized yet — used by the
-// cron handler to drain them in small batches.
+// cron handler to drain them in small batches. Pass `userId` to scope
+// to a single tenant, or `null` to scan across all users (used by cron
+// so every tenant's stale pages get drained, not just the default one).
 export async function findStaleEntityPages(
   db: D1Database,
-  userId: string,
+  userId: string | null,
   limit: number,
 ): Promise<WikiPageRow[]> {
-  const res = await db
-    .prepare(
-      `SELECT * FROM wiki_pages
-        WHERE user_id = ?1
-          AND kind NOT IN ('exhibit','exhibit_unknown','index','log')
-          AND instr(body, 'data-lang="zh"') = 0
-        ORDER BY inbound_links DESC, last_ingest_at ASC
-        LIMIT ?2`,
-    )
-    .bind(userId, limit)
-    .all<WikiPageRow>();
+  const res = userId
+    ? await db
+        .prepare(
+          `SELECT * FROM wiki_pages
+            WHERE user_id = ?1
+              AND kind NOT IN ('exhibit','exhibit_unknown','index','log')
+              AND instr(body, 'data-lang="zh"') = 0
+            ORDER BY inbound_links DESC, last_ingest_at ASC
+            LIMIT ?2`,
+        )
+        .bind(userId, limit)
+        .all<WikiPageRow>()
+    : await db
+        .prepare(
+          `SELECT * FROM wiki_pages
+            WHERE kind NOT IN ('exhibit','exhibit_unknown','index','log')
+              AND instr(body, 'data-lang="zh"') = 0
+            ORDER BY inbound_links DESC, last_ingest_at ASC
+            LIMIT ?1`,
+        )
+        .bind(limit)
+        .all<WikiPageRow>();
   return res.results ?? [];
 }
