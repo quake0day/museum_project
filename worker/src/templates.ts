@@ -3000,7 +3000,10 @@ export function renderTimeline(opts: {
     id: p.id,
     title: p.title,
     year: p.approx_year,
-    domain: p.primary_domain ?? "other",
+    domain: (() => {
+      const d = (p.primary_domain ?? "other").toLowerCase();
+      return d === "technology" ? "tech" : d;
+    })(),
     summary: p.child_summary ?? "",
   }));
   const dataJson = JSON.stringify(data);
@@ -3008,256 +3011,351 @@ export function renderTimeline(opts: {
   const body = `
   <section class="wiki">
     <div class="container">
-      <header style="margin-bottom: 1rem;">
+      <header class="tt-head">
         <p class="eyebrow">${ti("timeline.eyebrow")}</p>
         <h1>${ti("timeline.title")}</h1>
         <p class="muted">${points.length} ${ti("timeline.lede")}</p>
       </header>
 
-      <div class="tl-legend" aria-label="Domain legend">
-        <span class="tl-leg tl-history">🏺 ${ti("domain.history")}</span>
-        <span class="tl-leg tl-art">🎨 ${ti("domain.art")}</span>
-        <span class="tl-leg tl-science">🦖 ${ti("domain.science")}</span>
-        <span class="tl-leg tl-tech">⚙️ ${ti("domain.tech")}</span>
-        <span class="tl-leg tl-culture">🌍 ${ti("domain.culture")}</span>
+      <div class="tt-legend" aria-label="Domain legend">
+        <span class="tt-leg tt-d-history">🏺 ${ti("domain.history")}</span>
+        <span class="tt-leg tt-d-art">🎨 ${ti("domain.art")}</span>
+        <span class="tt-leg tt-d-science">🦖 ${ti("domain.science")}</span>
+        <span class="tt-leg tt-d-tech">⚙️ ${ti("domain.tech")}</span>
+        <span class="tt-leg tt-d-culture">🌍 ${ti("domain.culture")}</span>
       </div>
 
-      <div class="tl-wrap" id="tl-wrap">
+      <div class="tt-frame" id="tt-frame">
         ${points.length === 0
-          ? `<p class="muted" style="padding:2rem 0;">${ti("timeline.empty")}</p>`
-          : `<div class="tl-controls">
-              <button type="button" data-tl-zoom="-1" aria-label="${tx("timeline.zoomOut", lang)}">−</button>
-              <button type="button" data-tl-zoom="+1" aria-label="${tx("timeline.zoomIn", lang)}">＋</button>
-              <button type="button" data-tl-reset aria-label="${tx("timeline.reset", lang)}">${ti("timeline.reset")}</button>
+          ? `<p class="muted" style="padding:2rem;">${ti("timeline.empty")}</p>`
+          : `<div class="tt-controls">
+              <button type="button" data-tt-zoom="-1" aria-label="${tx("timeline.zoomOut", lang)}">−</button>
+              <button type="button" data-tt-zoom="+1" aria-label="${tx("timeline.zoomIn", lang)}">＋</button>
+              <button type="button" data-tt-reset aria-label="${tx("timeline.reset", lang)}">${ti("timeline.reset")}</button>
             </div>
-            <svg id="tl-svg" role="img" aria-label="Timeline of captured exhibits"></svg>
-            <div id="tl-tip" class="tl-tip" hidden></div>`
+            <div class="tt-scroll" id="tt-scroll">
+              <div class="tt-inner" id="tt-inner">
+                <div class="tt-stripes" id="tt-stripes" aria-hidden="true">
+                  <div></div><div></div><div></div><div></div><div></div><div></div>
+                </div>
+                <svg class="tt-edges" id="tt-edges" aria-hidden="true"></svg>
+                <div class="tt-grid" id="tt-grid"></div>
+              </div>
+            </div>
+            <div id="tt-tip" class="tt-tip" hidden></div>`
         }
       </div>
     </div>
   </section>
 
   <style>
-    .tl-legend { display:flex; gap:.5rem; flex-wrap: wrap; margin: 0 0 .75rem; font-size:.8rem; }
-    .tl-leg { padding:.18rem .55rem; border-radius:999px; background: var(--bg-elev); border:1px solid var(--border); }
-    .tl-history  { color: var(--d-history-ink);  border-color: color-mix(in srgb, var(--d-history) 30%, transparent); }
-    .tl-art      { color: var(--d-art-ink);      border-color: color-mix(in srgb, var(--d-art) 30%, transparent); }
-    .tl-science  { color: var(--d-science-ink);  border-color: color-mix(in srgb, var(--d-science) 30%, transparent); }
-    .tl-tech     { color: var(--d-tech-ink);     border-color: color-mix(in srgb, var(--d-tech) 30%, transparent); }
-    .tl-culture  { color: var(--d-culture-ink);  border-color: color-mix(in srgb, var(--d-culture) 30%, transparent); }
+    .tt-head { margin-bottom: 1rem; }
+    .tt-legend { display:flex; gap:.5rem; flex-wrap: wrap; margin: 0 0 .9rem; font-size:.8rem; }
+    .tt-leg { padding:.2rem .6rem; border-radius:999px; background: var(--bg-elev); border:1px solid var(--border); letter-spacing:.02em; }
+    .tt-d-history  { color: var(--d-history-ink);  border-color: color-mix(in srgb, var(--d-history) 36%, transparent); }
+    .tt-d-art      { color: var(--d-art-ink);      border-color: color-mix(in srgb, var(--d-art) 36%, transparent); }
+    .tt-d-science  { color: var(--d-science-ink);  border-color: color-mix(in srgb, var(--d-science) 36%, transparent); }
+    .tt-d-tech     { color: var(--d-tech-ink);     border-color: color-mix(in srgb, var(--d-tech) 36%, transparent); }
+    .tt-d-culture  { color: var(--d-culture-ink);  border-color: color-mix(in srgb, var(--d-culture) 36%, transparent); }
 
-    .tl-wrap {
+    /* Outer frame — heavy Civ-style border with gold inner trim */
+    .tt-frame {
       position: relative;
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(217,154,41,.07), transparent 55%),
+        radial-gradient(circle at 90% 100%, rgba(30,58,95,.08), transparent 60%),
+        linear-gradient(180deg, #F1E6CE 0%, #E8D9B5 100%);
+      border: 1px solid var(--border-strong);
       border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-sm);
+      box-shadow:
+        inset 0 0 0 1px rgba(217,154,41,.35),
+        inset 0 0 0 2px rgba(255,253,248,.6),
+        var(--shadow-md);
       overflow: hidden;
-      height: 520px;
     }
-    .tl-wrap svg { width: 100%; height: 100%; cursor: grab; user-select: none; touch-action: none; }
-    .tl-wrap svg:active { cursor: grabbing; }
-    .tl-controls {
-      position: absolute; top: .65rem; right: .65rem; z-index: 5;
-      display: flex; gap: .25rem;
+    [data-theme="dark"] .tt-frame {
+      background:
+        radial-gradient(circle at 20% 0%, rgba(233,183,99,.08), transparent 55%),
+        radial-gradient(circle at 90% 100%, rgba(120,166,200,.10), transparent 60%),
+        linear-gradient(180deg, #1A2334 0%, #111824 100%);
+      box-shadow:
+        inset 0 0 0 1px rgba(233,183,99,.28),
+        inset 0 0 0 2px rgba(255,255,255,.04),
+        var(--shadow-md);
     }
-    .tl-controls button {
-      width: 36px; height: 36px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: var(--bg-elev);
+    /* Decorative parchment grain via SVG noise */
+    .tt-frame::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      opacity: .35; mix-blend-mode: multiply;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.42  0 0 0 0 0.32  0 0 0 0 0.18  0 0 0 0.18 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    }
+    [data-theme="dark"] .tt-frame::before { opacity: .25; mix-blend-mode: screen; }
+
+    .tt-controls {
+      position: absolute; top: .75rem; right: .75rem; z-index: 6;
+      display: flex; gap: .3rem;
+    }
+    .tt-controls button {
+      min-width: 36px; height: 36px; padding: 0 .55rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-strong);
+      background: linear-gradient(180deg, var(--bg-elev) 0%, color-mix(in srgb, var(--bg-elev) 80%, var(--accent-soft)) 100%);
       color: var(--ink);
-      font-size: 1.1rem;
-      font-weight: 600;
+      font-family: 'Fraunces', serif;
+      font-size: 1.05rem; font-weight: 600;
       cursor: pointer;
-      box-shadow: var(--shadow-sm);
-      font-family: inherit;
+      box-shadow: 0 1px 0 rgba(255,253,248,.5) inset, var(--shadow-sm);
     }
-    .tl-controls button:hover { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
-    .tl-controls [data-tl-reset] { width: auto; padding: 0 .85rem; font-size: .85rem; font-weight: 500; }
+    .tt-controls button:hover {
+      border-color: var(--accent);
+      color: var(--accent-ink);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent), var(--shadow-sm);
+    }
+    .tt-controls [data-tt-reset] { font-size: .85rem; font-weight: 500; }
 
-    .tl-axis-line { stroke: var(--border-strong); stroke-width: 1; }
-    .tl-tick-line { stroke: var(--border-strong); stroke-width: 1; opacity: .6; }
-    .tl-tick-text { fill: var(--ink-muted); font-size: 11px; font-family: 'Inter', sans-serif; }
-    .tl-pin { cursor: pointer; transition: r .15s ease, opacity .15s ease; }
-    .tl-pin:hover { stroke: var(--ink); stroke-width: 2px; }
+    .tt-scroll {
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 4.5rem 1.25rem 1.25rem;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-strong) transparent;
+    }
+    .tt-inner {
+      position: relative;
+      transform-origin: top left;
+      transition: transform .2s var(--ease);
+      width: max-content;
+    }
+    .tt-grid {
+      display: grid;
+      grid-template-columns: 116px repeat(6, minmax(212px, 1fr));
+      grid-template-rows: 68px repeat(5, minmax(122px, auto));
+      gap: 0;
+      position: relative;
+      z-index: 2;
+    }
+    /* Edges SVG layer underneath the cards */
+    .tt-edges {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 1;
+      overflow: visible;
+    }
 
-    .tl-tip {
+    /* Era band headers (top row) */
+    .tt-era {
+      grid-row: 1;
+      padding: .55rem .85rem .5rem;
+      border-bottom: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+      position: relative;
+      text-align: center;
+    }
+    .tt-era + .tt-era { border-left: 1px dashed color-mix(in srgb, var(--border-strong) 70%, transparent); }
+    .tt-era::after {
+      content: ""; position: absolute; left: 12%; right: 12%; bottom: -4px; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      border-radius: 2px;
+    }
+    .tt-era-name {
+      font-family: 'Fraunces', serif; font-weight: 600;
+      font-size: .98rem; color: var(--ink); margin: 0;
+      letter-spacing: .02em;
+    }
+    .tt-era-latin {
+      display:block; font-family: 'Fraunces', serif; font-style: italic;
+      font-size: .68rem; letter-spacing: .22em; text-transform: uppercase;
+      color: var(--accent-ink); opacity: .8; margin-top: .1rem;
+    }
+
+    /* Row labels (domain) */
+    .tt-row {
+      grid-column: 1;
+      display: flex; align-items: center; justify-content: flex-end;
+      padding: .5rem .85rem .5rem .25rem;
+      border-right: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      position: relative;
+    }
+    .tt-row::after {
+      content: ""; position: absolute; right: -4px; top: 18%; bottom: 18%; width: 2px;
+      background: linear-gradient(180deg, transparent, var(--accent), transparent);
+      border-radius: 2px;
+    }
+    .tt-row-label {
+      font-family: 'Fraunces', serif; font-weight: 600;
+      font-size: .92rem; line-height: 1.15;
+      text-align: right;
+      color: var(--ink);
+    }
+    .tt-row-icon { font-size: 1.35rem; display:block; margin-bottom: .15rem; }
+
+    /* Cells (a domain × era container) — transparent so SVG edges show through */
+    .tt-cell {
+      position: relative;
+      padding: .55rem;
+      display: flex; flex-direction: column; gap: .5rem;
+      min-height: 100%;
+    }
+    /* Era column tints painted as a backdrop layer behind the edges */
+    .tt-stripes {
+      position: absolute;
+      top: 68px; left: 116px; right: 0; bottom: 0;
+      z-index: 0;
+      pointer-events: none;
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+    }
+    .tt-stripes > div:nth-child(odd)  { background: color-mix(in srgb, var(--accent-soft) 16%, transparent); }
+    .tt-stripes > div:nth-child(even) { background: color-mix(in srgb, var(--primary-soft) 14%, transparent); }
+    [data-theme="dark"] .tt-stripes > div:nth-child(odd)  { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+    [data-theme="dark"] .tt-stripes > div:nth-child(even) { background: color-mix(in srgb, var(--primary) 9%, transparent); }
+
+    /* Tech-tree NODE — Civ 7 style stone tablet with gold corner brackets */
+    .tt-node {
+      position: relative;
+      background: linear-gradient(180deg, var(--bg-elev) 0%, color-mix(in srgb, var(--bg-elev) 88%, var(--bg-soft)) 100%);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      padding: .55rem .65rem .5rem;
+      cursor: pointer;
+      box-shadow:
+        inset 0 1px 0 rgba(255,253,248,.7),
+        inset 0 -1px 0 rgba(0,0,0,.04),
+        0 1px 2px rgba(30,58,95,.12);
+      transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease);
+      isolation: isolate;
+    }
+    [data-theme="dark"] .tt-node {
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.05),
+        inset 0 -1px 0 rgba(0,0,0,.3),
+        0 1px 2px rgba(0,0,0,.4);
+    }
+    /* Gold bracket corners — Civ 7 signature */
+    .tt-node::before, .tt-node::after {
+      content: ""; position: absolute;
+      width: 9px; height: 9px;
+      border: 1.5px solid var(--accent);
+      pointer-events: none;
+      opacity: .85;
+    }
+    .tt-node::before { top: 2px; left: 2px; border-right: none; border-bottom: none; }
+    .tt-node::after  { bottom: 2px; right: 2px; border-left: none; border-top: none; }
+    .tt-node:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+      box-shadow:
+        inset 0 1px 0 rgba(255,253,248,.7),
+        0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent),
+        0 6px 18px rgba(217,154,41,.25);
+    }
+    .tt-node:hover::before, .tt-node:hover::after { opacity: 1; }
+
+    /* Left rail accent in domain color */
+    .tt-node[data-d="history"]  { border-left: 3px solid var(--d-history); }
+    .tt-node[data-d="art"]      { border-left: 3px solid var(--d-art); }
+    .tt-node[data-d="science"]  { border-left: 3px solid var(--d-science); }
+    .tt-node[data-d="tech"]     { border-left: 3px solid var(--d-tech); }
+    .tt-node[data-d="culture"]  { border-left: 3px solid var(--d-culture); }
+    .tt-node[data-d="other"]    { border-left: 3px solid var(--ink-muted); }
+
+    .tt-node-title {
+      font-family: 'Fraunces', serif;
+      font-weight: 600;
+      font-size: .88rem;
+      line-height: 1.2;
+      color: var(--ink);
+      margin: 0 0 .25rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .tt-node-year {
+      display: inline-block;
+      font-family: 'Fraunces', serif;
+      font-style: italic;
+      font-size: .68rem;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--accent-ink);
+      background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+      border-radius: 2px;
+      padding: .05rem .35rem;
+    }
+
+    /* Tooltip */
+    .tt-tip {
       position: absolute;
       pointer-events: none;
-      background: var(--ink);
-      color: #FFFDF8;
-      padding: .5rem .7rem;
-      border-radius: 8px;
+      background: linear-gradient(180deg, #1F2A3A 0%, #14202F 100%);
+      color: #F3E7CC;
+      padding: .55rem .75rem;
+      border: 1px solid var(--accent);
+      border-radius: 4px;
       font-size: .8rem;
-      max-width: 280px;
-      box-shadow: var(--shadow-md);
-      z-index: 10;
+      max-width: 300px;
+      box-shadow:
+        inset 0 0 0 1px rgba(217,154,41,.25),
+        0 12px 30px rgba(0,0,0,.35);
+      z-index: 20;
       transform: translate(-50%, -100%);
-      margin-top: -8px;
+      margin-top: -10px;
     }
-    .tl-tip strong { display:block; font-size: .85rem; margin-bottom: .15rem; }
-    .tl-tip .tl-tip-year { color: var(--accent); font-size: .7rem; letter-spacing: .04em; }
+    .tt-tip strong { display:block; font-family:'Fraunces',serif; font-size: .92rem; margin-bottom: .25rem; color:#FFFDF8; }
+    .tt-tip .tt-tip-year { display:block; color: var(--accent); font-size: .66rem; letter-spacing: .18em; text-transform: uppercase; margin-bottom: .3rem; }
+    .tt-tip .tt-tip-sum { line-height: 1.4; opacity:.9; }
+
+    /* Edge paths — gold sinew between same-domain neighbors */
+    .tt-edge {
+      fill: none;
+      stroke: url(#tt-edge-grad);
+      stroke-width: 2.6;
+      stroke-linecap: round;
+      filter: drop-shadow(0 0 2px rgba(168,111,28,.6));
+    }
+
+    @media (max-width: 720px) {
+      .tt-grid { grid-template-columns: 92px repeat(6, 180px); grid-template-rows: 60px repeat(5, minmax(110px, auto)); }
+      .tt-row-label { font-size: .8rem; }
+      .tt-era-name { font-size: .85rem; }
+      .tt-era-latin { font-size: .6rem; letter-spacing: .14em; }
+    }
   </style>
 
-  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js" crossorigin="anonymous"></script>
   <script>
   (function () {
     var data = ${dataJson};
-    if (!data.length || typeof d3 === 'undefined') return;
+    var frame = document.getElementById('tt-frame');
+    if (!frame || !data.length) return;
+    var grid = document.getElementById('tt-grid');
+    var edgesSvg = document.getElementById('tt-edges');
+    var inner = document.getElementById('tt-inner');
+    var scroll = document.getElementById('tt-scroll');
+    var tipEl = document.getElementById('tt-tip');
+    if (!grid || !edgesSvg || !inner) return;
 
-    var COLORS = {
-      history: getCSS('--d-history'),
-      art: getCSS('--d-art'),
-      science: getCSS('--d-science'),
-      tech: getCSS('--d-tech'),
-      technology: getCSS('--d-tech'),
-      culture: getCSS('--d-culture'),
-      other: getCSS('--ink-muted'),
-    };
-    function getCSS(name) {
-      return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#475569';
-    }
-
-    var wrap = document.getElementById('tl-wrap');
-    var svgEl = document.getElementById('tl-svg');
-    var tipEl = document.getElementById('tl-tip');
-    if (!wrap || !svgEl) return;
-
-    var rect = wrap.getBoundingClientRect();
-    var W = rect.width;
-    var H = rect.height;
-    var margin = { top: 24, right: 24, bottom: 48, left: 24 };
-
-    var svg = d3.select(svgEl).attr('viewBox', '0 0 ' + W + ' ' + H);
-
-    // Symmetric log scale so prehistory and the modern era both fit.
-    function slog(y) { return Math.sign(y) * Math.log10(Math.abs(y) + 1); }
-    function invSlog(s) { return Math.sign(s) * (Math.pow(10, Math.abs(s)) - 1); }
-
-    var years = data.map(function (d) { return d.year; });
-    var minY = d3.min(years);
-    var maxY = d3.max(years);
-    // Pad domain so extremes don't sit at the edge
-    var pad = Math.max(0.4, (slog(maxY) - slog(minY)) * 0.05);
-    var domain = [slog(minY) - pad, slog(maxY) + pad];
-
-    var x = d3.scaleLinear()
-      .domain(domain)
-      .range([margin.left, W - margin.right]);
-
-    // y is jittered so pins from the same era don't stack on top
-    var y = d3.scaleLinear()
-      .domain([0, 1])
-      .range([margin.top + 30, H - margin.bottom - 10]);
-
-    var jitter = data.map(function (_, i) {
-      // deterministic pseudo-random per index so pan/zoom stays stable
-      var x = Math.sin(i * 12.9898) * 43758.5453;
-      return x - Math.floor(x);
-    });
-
-    var gAxis = svg.append('g').attr('class', 'tl-axis');
-    var gPins = svg.append('g').attr('class', 'tl-pins');
-
-    // Static axis line
-    gAxis.append('line')
-      .attr('class', 'tl-axis-line')
-      .attr('x1', margin.left).attr('x2', W - margin.right)
-      .attr('y1', H - margin.bottom).attr('y2', H - margin.bottom);
-
-    // Pins (drawn once; transformed via zoom)
-    var pins = gPins.selectAll('circle')
-      .data(data)
-      .enter()
-      .append('circle')
-        .attr('class', 'tl-pin')
-        .attr('r', 6)
-        .attr('fill', function (d) { return COLORS[d.domain] || COLORS.other; })
-        .attr('opacity', 0.85)
-        .attr('stroke', '#FFFDF8')
-        .attr('stroke-width', 1.5)
-        .attr('cx', function (d) { return x(slog(d.year)); })
-        .attr('cy', function (d, i) { return y(jitter[i]); });
-
-    pins.on('mouseenter', function (event, d) {
-      var c = this.getBoundingClientRect();
-      var w = wrap.getBoundingClientRect();
-      tipEl.hidden = false;
-      tipEl.innerHTML = '<strong>' + esc(d.title) + '</strong>'
-        + '<span class="tl-tip-year">' + formatYear(d.year) + '</span>'
-        + (d.summary ? '<div style="margin-top:.3rem;line-height:1.4;">' + esc(d.summary) + '</div>' : '');
-      tipEl.style.left = (c.left - w.left + c.width / 2) + 'px';
-      tipEl.style.top  = (c.top  - w.top) + 'px';
-    });
-    pins.on('mouseleave', function () { tipEl.hidden = true; });
-    pins.on('click', function (event, d) {
-      window.location.href = '${langPx}/wiki/${user}/exhibits/' + encodeURIComponent(d.id);
-    });
-
-    // Curated tick set; the ticks visible at any zoom level are filtered
-    // by the current x-domain, and we space them out so labels don't
-    // overlap.
-    var TICK_YEARS = [
-      -200000000, -65000000, -10000000, -1000000, -100000, -10000, -3000,
-      -1000, -500, -200, 0, 500, 1000, 1500, 1700, 1800, 1900, 1950, 2000, 2025
+    var ERAS = [
+      { id: 'prehistoric', label: 'Prehistoric', latin: 'Praehistoria',  max: -3000 },
+      { id: 'ancient',     label: 'Ancient',     latin: 'Antiquitas',    max: 500 },
+      { id: 'medieval',    label: 'Medieval',    latin: 'Medium Aevum',  max: 1500 },
+      { id: 'renaissance', label: 'Renaissance', latin: 'Renascentia',   max: 1800 },
+      { id: 'industrial',  label: 'Industrial',  latin: 'Industria',     max: 1945 },
+      { id: 'modern',      label: 'Modern',      latin: 'Modernus',      max: Infinity },
+    ];
+    var DOMAINS = [
+      { id: 'history', label: 'History',    icon: '🏺' },
+      { id: 'art',     label: 'Art',        icon: '🎨' },
+      { id: 'science', label: 'Science',    icon: '🦖' },
+      { id: 'tech',    label: 'Technology', icon: '⚙️' },
+      { id: 'culture', label: 'Culture',    icon: '🌍' },
     ];
 
-    function drawAxis(scale) {
-      var d0 = scale.domain()[0], d1 = scale.domain()[1];
-      var visible = TICK_YEARS
-        .map(function (y) { return { year: y, sx: slog(y) }; })
-        .filter(function (t) { return t.sx >= d0 && t.sx <= d1; });
-
-      // Greedy thinning so labels don't overlap (~80px minimum gap)
-      var minGap = 80;
-      var kept = [];
-      visible.forEach(function (t) {
-        var px = scale(t.sx);
-        if (!kept.length || px - kept[kept.length - 1].px >= minGap) {
-          kept.push({ year: t.year, sx: t.sx, px: px });
-        }
-      });
-
-      var ticks = gAxis.selectAll('g.tl-tick').data(kept, function (d) { return d.year; });
-      ticks.exit().remove();
-      var enter = ticks.enter().append('g').attr('class', 'tl-tick');
-      enter.append('line').attr('class', 'tl-tick-line')
-        .attr('y1', H - margin.bottom - 6).attr('y2', H - margin.bottom + 6);
-      enter.append('text').attr('class', 'tl-tick-text')
-        .attr('y', H - margin.bottom + 22).attr('text-anchor', 'middle');
-      var merged = enter.merge(ticks);
-      merged.attr('transform', function (d) { return 'translate(' + d.px + ',0)'; });
-      merged.select('text').text(function (d) { return formatYear(d.year); });
+    function eraIndex(y) {
+      for (var i = 0; i < ERAS.length; i++) if (y < ERAS[i].max) return i;
+      return ERAS.length - 1;
     }
-
-    drawAxis(x);
-
-    // Zoom + pan via d3-zoom
-    var zoom = d3.zoom()
-      .scaleExtent([0.6, 60])
-      .translateExtent([[-W * 5, 0], [W * 6, H]])
-      .on('zoom', function (event) {
-        var t = event.transform;
-        var nx = t.rescaleX(x);
-        pins.attr('cx', function (d) { return nx(slog(d.year)); });
-        drawAxis(nx);
-      });
-
-    svg.call(zoom);
-
-    // Buttons
-    document.querySelectorAll('[data-tl-zoom]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var dir = parseInt(b.getAttribute('data-tl-zoom'), 10);
-        svg.transition().duration(220).call(zoom.scaleBy, dir > 0 ? 1.6 : 0.625);
-      });
-    });
-    var resetBtn = document.querySelector('[data-tl-reset]');
-    if (resetBtn) resetBtn.addEventListener('click', function () {
-      svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
-    });
-
     function esc(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
         return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
@@ -3273,6 +3371,167 @@ export function renderTimeline(opts: {
       }
       return y + ' CE';
     }
+
+    // ── 1. Era band header row ────────────────────────────────────────
+    ERAS.forEach(function (era, i) {
+      var el = document.createElement('div');
+      el.className = 'tt-era';
+      el.style.gridColumn = (i + 2) + ' / ' + (i + 3);
+      el.innerHTML = '<p class="tt-era-name">' + esc(era.label) + '</p>'
+        + '<span class="tt-era-latin">' + esc(era.latin) + '</span>';
+      grid.appendChild(el);
+    });
+
+    // ── 2. Domain row labels + empty cells ────────────────────────────
+    var cellRefs = {}; // cellRefs[domain][era] = container element
+    DOMAINS.forEach(function (dom, ri) {
+      cellRefs[dom.id] = {};
+      var label = document.createElement('div');
+      label.className = 'tt-row';
+      label.style.gridRow = (ri + 2) + ' / ' + (ri + 3);
+      label.innerHTML = '<div><span class="tt-row-icon">' + dom.icon + '</span>'
+        + '<div class="tt-row-label">' + esc(dom.label) + '</div></div>';
+      grid.appendChild(label);
+
+      ERAS.forEach(function (era, ei) {
+        var cell = document.createElement('div');
+        cell.className = 'tt-cell';
+        cell.setAttribute('data-era', String(ei));
+        cell.setAttribute('data-domain', dom.id);
+        cell.style.gridColumn = (ei + 2) + ' / ' + (ei + 3);
+        cell.style.gridRow = (ri + 2) + ' / ' + (ri + 3);
+        grid.appendChild(cell);
+        cellRefs[dom.id][ei] = cell;
+      });
+    });
+
+    // ── 3. Bucket data + render nodes ─────────────────────────────────
+    var sorted = data.slice().sort(function (a, b) { return a.year - b.year; });
+    var nodeEls = []; // chronological order, for connector drawing
+
+    sorted.forEach(function (d) {
+      var dom = d.domain;
+      if (!cellRefs[dom]) dom = 'other';
+      var ei = eraIndex(d.year);
+      // unknown domain — drop into culture row as a soft fallback
+      var cell = (cellRefs[dom] && cellRefs[dom][ei]) || cellRefs['culture'][ei];
+      var node = document.createElement('div');
+      node.className = 'tt-node';
+      node.setAttribute('data-d', cellRefs[dom] ? dom : 'other');
+      node.setAttribute('data-id', d.id);
+      node.setAttribute('role', 'button');
+      node.setAttribute('tabindex', '0');
+      node.innerHTML =
+        '<h3 class="tt-node-title">' + esc(d.title) + '</h3>'
+        + '<span class="tt-node-year">' + formatYear(d.year) + '</span>';
+      cell.appendChild(node);
+      nodeEls.push({ el: node, point: d, domain: cellRefs[dom] ? dom : 'other' });
+    });
+
+    // ── 4. Interaction: hover tooltip + click navigation ──────────────
+    nodeEls.forEach(function (n) {
+      var d = n.point;
+      n.el.addEventListener('mouseenter', function () {
+        if (!tipEl) return;
+        var r = n.el.getBoundingClientRect();
+        var fr = frame.getBoundingClientRect();
+        tipEl.hidden = false;
+        tipEl.innerHTML = '<strong>' + esc(d.title) + '</strong>'
+          + '<span class="tt-tip-year">' + formatYear(d.year) + '</span>'
+          + (d.summary ? '<div class="tt-tip-sum">' + esc(d.summary) + '</div>' : '');
+        tipEl.style.left = (r.left - fr.left + r.width / 2) + 'px';
+        tipEl.style.top  = (r.top  - fr.top) + 'px';
+      });
+      n.el.addEventListener('mouseleave', function () { if (tipEl) tipEl.hidden = true; });
+      var go = function () {
+        window.location.href = '${langPx}/wiki/${user}/exhibits/' + encodeURIComponent(d.id);
+      };
+      n.el.addEventListener('click', go);
+      n.el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+      });
+    });
+
+    // Walk the offsetParent chain to get el position relative to root.
+    // Coordinates are pre-transform (unscaled), which is what we need
+    // so the SVG (also inside .tt-inner) scales with the grid.
+    function offsetTo(el, root) {
+      var x = 0, y = 0;
+      while (el && el !== root) {
+        x += el.offsetLeft;
+        y += el.offsetTop;
+        el = el.offsetParent;
+      }
+      return { x: x, y: y };
+    }
+
+    // ── 5. Draw connector edges between same-domain chronological neighbors
+    function drawEdges() {
+      while (edgesSvg.firstChild) edgesSvg.removeChild(edgesSvg.firstChild);
+      var W = inner.offsetWidth;
+      var H = inner.offsetHeight;
+      edgesSvg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+      edgesSvg.setAttribute('width',  W);
+      edgesSvg.setAttribute('height', H);
+
+      var SVG_NS = 'http://www.w3.org/2000/svg';
+      var defs = document.createElementNS(SVG_NS, 'defs');
+      defs.innerHTML =
+        '<linearGradient id="tt-edge-grad" x1="0%" y1="0%" x2="100%" y2="0%">' +
+        '  <stop offset="0%"  stop-color="#A86F1C" stop-opacity=".95"/>' +
+        '  <stop offset="50%" stop-color="#E0AE40" stop-opacity="1"/>' +
+        '  <stop offset="100%" stop-color="#A86F1C" stop-opacity=".95"/>' +
+        '</linearGradient>';
+      edgesSvg.appendChild(defs);
+
+      var byDomain = {};
+      nodeEls.forEach(function (n) {
+        (byDomain[n.domain] = byDomain[n.domain] || []).push(n);
+      });
+      Object.keys(byDomain).forEach(function (dom) {
+        var arr = byDomain[dom].slice().sort(function (a, b) { return a.point.year - b.point.year; });
+        for (var i = 0; i < arr.length - 1; i++) {
+          var a = offsetTo(arr[i].el, inner);
+          var b = offsetTo(arr[i + 1].el, inner);
+          var ax = a.x + arr[i].el.offsetWidth;
+          var ay = a.y + arr[i].el.offsetHeight / 2;
+          var bx = b.x;
+          var by = b.y + arr[i + 1].el.offsetHeight / 2;
+          var dx = Math.max(28, (bx - ax) * 0.45);
+          var d  = 'M ' + ax + ' ' + ay
+                 + ' C ' + (ax + dx) + ' ' + ay
+                 +   ' ' + (bx - dx) + ' ' + by
+                 +   ' ' + bx + ' ' + by;
+          var path = document.createElementNS(SVG_NS, 'path');
+          path.setAttribute('d', d);
+          path.setAttribute('class', 'tt-edge');
+          edgesSvg.appendChild(path);
+        }
+      });
+    }
+
+    // Draw after layout settles
+    requestAnimationFrame(function () { requestAnimationFrame(drawEdges); });
+    window.addEventListener('resize', drawEdges);
+
+    // ── 6. Zoom controls (CSS transform on .tt-inner) ─────────────────
+    var scale = 1;
+    function applyScale() {
+      inner.style.transform = 'scale(' + scale + ')';
+      // Keep edge layer aligned after scale (it lives inside .tt-inner so it scales too)
+    }
+    document.querySelectorAll('[data-tt-zoom]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var dir = parseInt(b.getAttribute('data-tt-zoom'), 10);
+        scale = Math.min(1.8, Math.max(0.5, scale * (dir > 0 ? 1.15 : 0.87)));
+        applyScale();
+      });
+    });
+    var reset = document.querySelector('[data-tt-reset]');
+    if (reset) reset.addEventListener('click', function () {
+      scale = 1; applyScale();
+      if (scroll) scroll.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+    });
   })();
   </script>`;
   return layout({ title: "Timeline — MuseIQ", active: "timeline", body, currentUser: opts.currentUser ?? opts.user, isSignedIn: opts.isSignedIn, lang });
